@@ -2,6 +2,7 @@ import json
 import re
 from storage.db import get_conn
 from llm.client import chat
+import psycopg2.extras
 
 
 EXTRACT_SYSTEM = """You are a memory extraction engine. The user wants to store a behavioral rule.
@@ -44,18 +45,14 @@ async def store_memory(raw_input: str) -> dict:
             raise ValueError(f"LLM returned non-JSON memory: {response}")
 
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
-        "INSERT INTO memories (raw_input, trigger_pattern, action_type, action_params) VALUES (?, ?, ?, ?)",
-        (
-            raw_input,
-            parsed["trigger_pattern"],
-            parsed["action_type"],
-            json.dumps(parsed["action_params"]),
-        ),
+        "INSERT INTO memories (raw_input, trigger_pattern, action_type, action_params) VALUES (%s, %s, %s, %s) RETURNING id",
+        (raw_input, parsed["trigger_pattern"], parsed["action_type"], json.dumps(parsed["action_params"])),
     )
+    row_id = cur.fetchone()["id"]
     conn.commit()
-    row_id = cur.lastrowid
+    cur.close()
     conn.close()
 
     return {"id": row_id, **parsed}
@@ -63,13 +60,14 @@ async def store_memory(raw_input: str) -> dict:
 
 def get_all_memories() -> list[dict]:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT id, raw_input, trigger_pattern, action_type, action_params FROM memories")
     rows = []
     for r in cur.fetchall():
         row = dict(r)
         row["action_params"] = json.loads(row["action_params"])
         rows.append(row)
+    cur.close()
     conn.close()
     return rows
 
@@ -104,9 +102,10 @@ async def match_memories(message: str) -> list[dict]:
 def delete_memory(memory_id: int) -> bool:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-    conn.commit()
+    cur.execute("DELETE FROM memories WHERE id = %s", (memory_id,))
     affected = cur.rowcount
+    conn.commit()
+    cur.close()
     conn.close()
     return affected > 0
 

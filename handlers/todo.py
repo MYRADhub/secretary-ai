@@ -1,5 +1,5 @@
-import sqlite3
 from storage.db import get_conn
+import psycopg2.extras
 
 PRIORITIES = {"high", "medium", "normal", "low"}
 PRIORITY_LABEL = {"high": "!", "medium": "~", "normal": "", "low": "v"}
@@ -7,29 +7,31 @@ PRIORITY_LABEL = {"high": "!", "medium": "~", "normal": "", "low": "v"}
 
 def _get_ordered(include_done: bool = False) -> list[dict]:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if include_done:
         cur.execute("SELECT id, text, done, priority, order_index FROM todos ORDER BY order_index ASC")
     else:
         cur.execute("SELECT id, text, done, priority, order_index FROM todos WHERE done = 0 ORDER BY order_index ASC")
     rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
     conn.close()
     return rows
 
 
 def add_todo(text: str, priority: str = "normal") -> dict:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT MAX(order_index) FROM todos")
     row = cur.fetchone()
-    max_order = row[0] if row[0] is not None else 0
+    max_order = row["max"] if row["max"] is not None else 0
     order_index = max_order + 1
     cur.execute(
-        "INSERT INTO todos (text, priority, order_index) VALUES (?, ?, ?)",
+        "INSERT INTO todos (text, priority, order_index) VALUES (%s, %s, %s) RETURNING id",
         (text, priority if priority in PRIORITIES else "normal", order_index),
     )
+    row_id = cur.fetchone()["id"]
     conn.commit()
-    row_id = cur.lastrowid
+    cur.close()
     conn.close()
     return {"id": row_id, "text": text, "priority": priority}
 
@@ -54,8 +56,9 @@ def complete_todo(position: int) -> bool:
         return False
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE todos SET done = 1 WHERE id = ?", (row["id"],))
+    cur.execute("UPDATE todos SET done = 1 WHERE id = %s", (row["id"],))
     conn.commit()
+    cur.close()
     conn.close()
     return True
 
@@ -66,8 +69,9 @@ def delete_todo(position: int) -> bool:
         return False
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("DELETE FROM todos WHERE id = ?", (row["id"],))
+    cur.execute("DELETE FROM todos WHERE id = %s", (row["id"],))
     conn.commit()
+    cur.close()
     conn.close()
     return True
 
@@ -78,8 +82,9 @@ def rename_todo(position: int, new_text: str) -> bool:
         return False
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE todos SET text = ? WHERE id = ?", (new_text, row["id"]))
+    cur.execute("UPDATE todos SET text = %s WHERE id = %s", (new_text, row["id"]))
     conn.commit()
+    cur.close()
     conn.close()
     return True
 
@@ -92,8 +97,9 @@ def set_priority(position: int, priority: str) -> bool:
         return False
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE todos SET priority = ? WHERE id = ?", (priority, row["id"]))
+    cur.execute("UPDATE todos SET priority = %s WHERE id = %s", (priority, row["id"]))
     conn.commit()
+    cur.close()
     conn.close()
     return True
 
@@ -104,15 +110,13 @@ def move_todo(from_position: int, to_position: int) -> bool:
         return False
     if from_position == to_position:
         return True
-
-    item = rows[from_position - 1]
     rows.insert(to_position - 1, rows.pop(from_position - 1))
-
     conn = get_conn()
     cur = conn.cursor()
     for i, row in enumerate(rows):
-        cur.execute("UPDATE todos SET order_index = ? WHERE id = ?", (float(i + 1), row["id"]))
+        cur.execute("UPDATE todos SET order_index = %s WHERE id = %s", (float(i + 1), row["id"]))
     conn.commit()
+    cur.close()
     conn.close()
     return True
 
@@ -121,8 +125,9 @@ def clear_all_todos() -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("DELETE FROM todos WHERE done = 0")
-    conn.commit()
     affected = cur.rowcount
+    conn.commit()
+    cur.close()
     conn.close()
     return affected
 
@@ -131,8 +136,9 @@ def complete_all_todos() -> int:
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE todos SET done = 1 WHERE done = 0")
-    conn.commit()
     affected = cur.rowcount
+    conn.commit()
+    cur.close()
     conn.close()
     return affected
 

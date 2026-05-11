@@ -3,16 +3,18 @@ import asyncio
 from datetime import datetime
 from storage.db import get_conn
 from llm.client import chat
+import psycopg2.extras
 import config
 
-TELEGRAM_MAX = 4000  # leave headroom under 4096
+TELEGRAM_MAX = 4000
 
 
 def _get_preferences() -> dict:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT topics_follow, topics_skip FROM news_preferences WHERE id = 1")
     row = cur.fetchone()
+    cur.close()
     conn.close()
     return {"follow": row["topics_follow"], "skip": row["topics_skip"]} if row else {"follow": "", "skip": ""}
 
@@ -21,18 +23,20 @@ def update_preferences(follow: str | None = None, skip: str | None = None) -> No
     conn = get_conn()
     cur = conn.cursor()
     if follow is not None:
-        cur.execute("UPDATE news_preferences SET topics_follow = ? WHERE id = 1", (follow,))
+        cur.execute("UPDATE news_preferences SET topics_follow = %s WHERE id = 1", (follow,))
     if skip is not None:
-        cur.execute("UPDATE news_preferences SET topics_skip = ? WHERE id = 1", (skip,))
+        cur.execute("UPDATE news_preferences SET topics_skip = %s WHERE id = 1", (skip,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def get_recent_digests(limit: int = 5) -> list[dict]:
     conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT digest, created_at FROM news_digests ORDER BY created_at DESC LIMIT ?", (limit,))
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("SELECT digest, created_at FROM news_digests ORDER BY created_at DESC LIMIT %s", (limit,))
     rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
     conn.close()
     return rows
 
@@ -40,16 +44,18 @@ def get_recent_digests(limit: int = 5) -> list[dict]:
 def _save_digest(digest: str) -> None:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT INTO news_digests (digest) VALUES (?)", (digest,))
+    cur.execute("INSERT INTO news_digests (digest) VALUES (%s)", (digest,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def _is_already_sent(url: str) -> bool:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM news_sent WHERE item_url = ?", (url,))
+    cur.execute("SELECT 1 FROM news_sent WHERE item_url = %s", (url,))
     exists = cur.fetchone() is not None
+    cur.close()
     conn.close()
     return exists
 
@@ -57,8 +63,9 @@ def _is_already_sent(url: str) -> bool:
 def _mark_sent(url: str) -> None:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("INSERT OR IGNORE INTO news_sent (item_url) VALUES (?)", (url,))
+    cur.execute("INSERT INTO news_sent (item_url) VALUES (%s) ON CONFLICT DO NOTHING", (url,))
     conn.commit()
+    cur.close()
     conn.close()
 
 

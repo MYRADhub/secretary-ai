@@ -17,4 +17,4 @@ NEWS_FEEDS = [
     "https://techcrunch.com/feed/",
 ]
 
-DB_PATH = os.getenv("DB_PATH", "/data/secretary.db")
+DATABASE_URL = os.getenv("DATABASE_URL")

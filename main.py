@@ -20,6 +20,8 @@ def validate_config() -> None:
         missing.append("TELEGRAM_BOT_TOKEN")
     if not config.TELEGRAM_ALLOWED_USER_ID:
         missing.append("TELEGRAM_ALLOWED_USER_ID")
+    if not config.DATABASE_URL:
+        missing.append("DATABASE_URL")
     if missing:
         raise RuntimeError(f"Missing required config: {', '.join(missing)}")
 

@@ -1,29 +1,30 @@
 from datetime import datetime
 from storage.db import get_conn
+import psycopg2.extras
 
 
 def add_reminder(text: str, remind_at: datetime) -> dict:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
-        "INSERT INTO reminders (text, remind_at) VALUES (?, ?)",
-        (text, remind_at.isoformat()),
+        "INSERT INTO reminders (text, remind_at) VALUES (%s, %s) RETURNING id",
+        (text, remind_at),
     )
+    row_id = cur.fetchone()["id"]
     conn.commit()
-    row_id = cur.lastrowid
+    cur.close()
     conn.close()
     return {"id": row_id, "text": text, "remind_at": remind_at.isoformat()}
 
 
 def get_due_reminders() -> list[dict]:
     conn = get_conn()
-    cur = conn.cursor()
-    now = datetime.now().isoformat()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
-        "SELECT id, text, remind_at FROM reminders WHERE sent = 0 AND remind_at <= ?",
-        (now,),
+        "SELECT id, text, remind_at FROM reminders WHERE sent = 0 AND remind_at <= NOW()",
     )
     rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
     conn.close()
     return rows
 
@@ -31,18 +32,20 @@ def get_due_reminders() -> list[dict]:
 def mark_reminder_sent(reminder_id: int) -> None:
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE reminders SET sent = 1 WHERE id = ?", (reminder_id,))
+    cur.execute("UPDATE reminders SET sent = 1 WHERE id = %s", (reminder_id,))
     conn.commit()
+    cur.close()
     conn.close()
 
 
 def list_pending_reminders() -> list[dict]:
     conn = get_conn()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
         "SELECT id, text, remind_at FROM reminders WHERE sent = 0 ORDER BY remind_at ASC"
     )
     rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
     conn.close()
     return rows
 
@@ -52,6 +55,8 @@ def format_reminders(reminders: list[dict]) -> str:
         return "No pending reminders."
     lines = []
     for r in reminders:
-        dt = datetime.fromisoformat(r["remind_at"])
+        dt = r["remind_at"]
+        if isinstance(dt, str):
+            dt = datetime.fromisoformat(dt)
         lines.append(f"[{r['id']}] {r['text']} — {dt.strftime('%Y-%m-%d %H:%M')}")
     return "\n".join(lines)
