@@ -13,7 +13,8 @@ INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Cl
 Intents:
 - add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc.
   params: {"text": "...", "priority": "high|medium|normal|low"}
-- list_todos: show task list. params: {"include_done": true/false} — true if user says "show all", "everything", "including done"
+- list_todos: show full task list with no filtering. params: {"include_done": true/false} — true if user says "show all", "everything", "including done"
+- filter_todos: user wants a filtered or sorted view — by keyword, person, priority, date, category, etc. params: {"query": "<the filter/sort description>", "include_done": true/false}
 - complete_todo: mark a task done. params: {"position": <int or null>}
 - complete_all_todos: mark all tasks done
 - delete_todo: delete one task. params: {"position": <int>}
@@ -94,6 +95,26 @@ async def dispatch(message: str, send_news_fn=None) -> str:
         include_done = params.get("include_done", False)
         todos = todo.list_todos(include_done=include_done)
         reply = todo.format_todo_list(todos)
+
+    elif intent == "filter_todos":
+        query = params.get("query", message)
+        include_done = params.get("include_done", False)
+        todos = todo.list_todos(include_done=include_done)
+        if not todos:
+            reply = "No tasks."
+        else:
+            tasks_text = "\n".join(
+                f"{t['position']}. {'[done] ' if t['done'] else ''}[{t['priority']}] {t['text']}"
+                for t in todos
+            )
+            reply = await chat(messages=[
+                {"role": "system", "content": (
+                    "You are a task list assistant. The user wants a filtered or sorted view of their tasks. "
+                    "Apply the filter/sort and return ONLY the matching tasks as a clean numbered list. "
+                    "Keep the original position numbers. If nothing matches, say so. Be concise."
+                )},
+                {"role": "user", "content": f"Tasks:\n{tasks_text}\n\nRequest: {query}"},
+            ])
 
     elif intent == "complete_todo":
         position = params.get("position")
