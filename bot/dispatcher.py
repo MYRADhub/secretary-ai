@@ -4,6 +4,7 @@ from collections import deque
 from datetime import datetime, timedelta
 from llm.client import chat
 from handlers import todo, reminder, memory
+from handlers.news import get_recent_digests, update_preferences
 
 HISTORY_MAX = 20
 _history: deque = deque(maxlen=HISTORY_MAX)
@@ -28,7 +29,9 @@ Intents:
 - store_memory: store a behavioral rule ("remember that...")
 - list_memories: list stored memories
 - delete_memory: delete a memory. params: {"id": <int>}
-- get_news: user wants tech news
+- get_news: user wants tech news now
+- news_recall: user asks about a past digest, e.g. "what was in the morning news", "what did you send earlier"
+- news_preferences: user wants to change what news topics to follow or skip. params: {"follow": "...", "skip": "..."} — include only what was mentioned
 - clear_history: user wants to reset/forget conversation history. Triggered by "forget this", "clear history", "start fresh", "new conversation", "ignore what we said", etc.
 - general: anything else
 
@@ -56,7 +59,7 @@ async def parse_intent(message: str) -> dict:
 
 
 async def dispatch(message: str, send_news_fn=None) -> str:
-    matched_memories = memory.match_memories(message)
+    matched_memories = await memory.match_memories(message)
     if matched_memories:
         mem = matched_memories[0]
         action = mem["action_type"]
@@ -206,6 +209,30 @@ async def dispatch(message: str, send_news_fn=None) -> str:
 
     elif intent == "get_news":
         reply = await send_news_fn() if send_news_fn else "News unavailable."
+
+    elif intent == "news_recall":
+        digests = get_recent_digests(limit=3)
+        if not digests:
+            reply = "No past digests found."
+        else:
+            combined = "\n\n---\n\n".join(
+                f"{d['created_at']}\n{d['digest']}" for d in digests
+            )
+            reply = await chat(messages=[
+                {"role": "system", "content": "You are a helpful secretary. Answer the user's question using the past news digests below. Be concise."},
+                {"role": "user", "content": f"Past digests:\n\n{combined}\n\nQuestion: {message}"},
+            ])
+
+    elif intent == "news_preferences":
+        follow = params.get("follow")
+        skip = params.get("skip")
+        update_preferences(follow=follow, skip=skip)
+        parts = []
+        if follow:
+            parts.append(f"following: {follow}")
+        if skip:
+            parts.append(f"skipping: {skip}")
+        reply = f"News preferences updated — {', '.join(parts)}."
 
     elif intent == "clear_history":
         _history.clear()

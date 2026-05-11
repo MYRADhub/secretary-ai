@@ -6,18 +6,24 @@ from llm.client import chat
 
 EXTRACT_SYSTEM = """You are a memory extraction engine. The user wants to store a behavioral rule.
 Extract the rule into structured JSON with these fields:
-- trigger_pattern: a regex or keyword phrase that will match future user messages
+- trigger_pattern: a short natural language description of what message/situation triggers this rule
 - action_type: one of "set_reminder", "add_todo", "custom_reply", "forward_to_llm"
 - action_params: a dict with parameters relevant to the action
 
 Examples:
 User: "remember that when i say meeting with mark at 10 you set a reminder at 9:45"
-Output: {"trigger_pattern": "meeting with mark at (\\d+)", "action_type": "set_reminder", "action_params": {"offset_minutes": -15, "label": "meeting with Mark"}}
+Output: {"trigger_pattern": "meeting with mark at a time", "action_type": "set_reminder", "action_params": {"offset_minutes": -15, "label": "meeting with Mark"}}
 
 User: "remember that groceries always go into a todo"
-Output: {"trigger_pattern": "groceries", "action_type": "add_todo", "action_params": {"prefix": "Buy: "}}
+Output: {"trigger_pattern": "user mentions groceries", "action_type": "add_todo", "action_params": {"prefix": "Buy: "}}
 
 Return ONLY valid JSON, no explanation."""
+
+
+MATCH_SYSTEM = """You are a memory rule matcher. Given a user message and a list of stored rules, return the IDs of rules that should be triggered by this message.
+
+Return JSON only: {"matched_ids": [<id>, ...]}
+Return an empty list if nothing matches. Be conservative — only match when the trigger clearly applies."""
 
 
 async def store_memory(raw_input: str) -> dict:
@@ -68,17 +74,31 @@ def get_all_memories() -> list[dict]:
     return rows
 
 
-def match_memories(message: str) -> list[dict]:
+async def match_memories(message: str) -> list[dict]:
     memories = get_all_memories()
-    matched = []
-    for mem in memories:
-        try:
-            if re.search(mem["trigger_pattern"], message, re.IGNORECASE):
-                matched.append(mem)
-        except re.error:
-            if mem["trigger_pattern"].lower() in message.lower():
-                matched.append(mem)
-    return matched
+    if not memories:
+        return []
+
+    rules_text = "\n".join(
+        f"ID {m['id']}: {m['trigger_pattern']}"
+        for m in memories
+    )
+
+    response = await chat(
+        messages=[
+            {"role": "system", "content": MATCH_SYSTEM},
+            {"role": "user", "content": f"Message: {message}\n\nRules:\n{rules_text}"},
+        ]
+    )
+
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError:
+        json_match = re.search(r"\{.*\}", response, re.DOTALL)
+        result = json.loads(json_match.group()) if json_match else {"matched_ids": []}
+
+    matched_ids = set(result.get("matched_ids", []))
+    return [m for m in memories if m["id"] in matched_ids]
 
 
 def delete_memory(memory_id: int) -> bool:

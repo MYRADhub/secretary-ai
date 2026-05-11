@@ -2,8 +2,11 @@ import logging
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from bot.dispatcher import dispatch
-from handlers.news import fetch_and_summarize
+from handlers.news import fetch_and_summarize, chunk_message
 import config
+
+def _chunk(text: str) -> list[str]:
+    return chunk_message(text)
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +30,8 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     try:
         response = await dispatch(text, send_news_fn=fetch_and_summarize)
-        await update.message.reply_text(response)
+        for chunk in _chunk(response):
+            await update.message.reply_text(chunk)
     except Exception:
         logger.exception("Error handling message")
         await update.message.reply_text("Something went wrong. Try again.")
@@ -61,4 +65,5 @@ async def send_message(text: str) -> None:
     if _app is None or allowed_id is None:
         logger.warning("Cannot send proactive message: app or user ID not configured")
         return
-    await _app.bot.send_message(chat_id=allowed_id, text=text)
+    for chunk in _chunk(text):
+        await _app.bot.send_message(chat_id=allowed_id, text=chunk)
