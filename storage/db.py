@@ -115,10 +115,17 @@ def init_db() -> None:
         END $$
     """)
 
-    # Migrate news_preferences: add category column if missing, re-key
+    # Migrate news_preferences: drop legacy check constraint, add category column if missing
     cur.execute("""
         DO $$
         BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'news_preferences_id_check'
+                AND conrelid = 'news_preferences'::regclass
+            ) THEN
+                ALTER TABLE news_preferences DROP CONSTRAINT news_preferences_id_check;
+            END IF;
             IF NOT EXISTS (
                 SELECT 1 FROM information_schema.columns
                 WHERE table_name = 'news_preferences' AND column_name = 'category'
