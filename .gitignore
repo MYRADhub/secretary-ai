@@ -13,3 +13,5 @@ dist/
 build/
 *.egg-info/
 .DS_Store
+access_token.txt
+bot.log
