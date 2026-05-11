@@ -14,3 +14,6 @@ systemctl restart secretary-ai
 
 echo "Done. Status:"
 systemctl status secretary-ai --no-pager
+
+echo "Sending deploy notification..."
+/home/secretary/secretary-ai/.venv/bin/python /home/secretary/secretary-ai/deploy/notify.py "Update deployed."
