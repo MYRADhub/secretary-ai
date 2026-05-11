@@ -1,4 +1,6 @@
-from openai import AsyncOpenAI
+import asyncio
+import re
+from openai import AsyncOpenAI, RateLimitError
 import config
 
 # Gemini client via OpenAI-compatible endpoint
@@ -27,12 +29,22 @@ def get_openai_client() -> AsyncOpenAI:
 
 async def chat(messages: list[dict], model: str | None = None, temperature: float = 0.3) -> str:
     client = get_gemini_client()
-    response = await client.chat.completions.create(
-        model=model or config.GEMINI_MODEL,
-        messages=messages,
-        temperature=temperature,
-    )
-    return response.choices[0].message.content.strip()
+    for attempt in range(2):
+        try:
+            response = await client.chat.completions.create(
+                model=model or config.GEMINI_MODEL,
+                messages=messages,
+                temperature=temperature,
+            )
+            return response.choices[0].message.content.strip()
+        except RateLimitError as e:
+            if attempt == 1:
+                raise
+            delay = 30
+            match = re.search(r"retry in (\d+)", str(e), re.IGNORECASE)
+            if match:
+                delay = int(match.group(1)) + 2
+            await asyncio.sleep(delay)
 
 
 async def transcribe(file_path: str) -> str:
