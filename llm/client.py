@@ -11,7 +11,7 @@ def get_client() -> AsyncOpenAI:
     return _client
 
 
-_NO_TEMPERATURE_MODELS = {"gpt-5-mini", "o1", "o1-mini", "o3", "o3-mini"}
+_NO_TEMPERATURE_MODELS = {"gpt-5-mini", "gpt-5-nano", "o1", "o1-mini", "o3", "o3-mini"}
 
 
 async def chat(messages: list[dict], model: str | None = None, temperature: float = 0.3) -> str:
