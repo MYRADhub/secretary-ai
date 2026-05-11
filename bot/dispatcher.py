@@ -2,7 +2,10 @@ import json
 import re
 from collections import deque
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from llm.client import chat
+
+TZ = ZoneInfo("America/New_York")
 from handlers import todo, reminder, memory
 from handlers.news import get_recent_digests, update_preferences, fetch_and_summarize
 
@@ -42,7 +45,7 @@ Current datetime: """
 
 
 async def parse_intent(message: str) -> dict:
-    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     system = INTENT_SYSTEM + now
 
     messages = [{"role": "system", "content": system}]
@@ -73,7 +76,7 @@ async def dispatch(message: str) -> str:
                 hour = int(time_match.group(1))
                 minute = int(time_match.group(2) or 0)
                 offset = params.get("offset_minutes", 0)
-                remind_dt = datetime.now().replace(hour=hour, minute=minute, second=0, microsecond=0)
+                remind_dt = datetime.now(TZ).replace(hour=hour, minute=minute, second=0, microsecond=0)
                 remind_dt += timedelta(minutes=offset)
                 label = params.get("label", message)
                 result = reminder.add_reminder(label, remind_dt)

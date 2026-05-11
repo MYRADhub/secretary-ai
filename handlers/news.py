@@ -1,7 +1,10 @@
 import feedparser
 import asyncio
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from storage.db import get_conn
+
+TZ = ZoneInfo("America/New_York")
 from llm.client import chat
 import psycopg2.extras
 import config
@@ -182,7 +185,7 @@ async def fetch_and_summarize(category: str = "tech") -> str:
     for item in all_items:
         _mark_sent(item["url"], category)
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    timestamp = datetime.now(TZ).strftime("%Y-%m-%d %H:%M ET")
     full_digest = f"{label} digest — {timestamp}\n\n{digest}"
     _save_digest(category, full_digest)
     return full_digest

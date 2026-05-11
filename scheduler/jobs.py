@@ -3,7 +3,10 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers.news import fetch_and_summarize
 from handlers.reminder import get_due_reminders, mark_reminder_sent
+from zoneinfo import ZoneInfo
 import config
+
+TZ = ZoneInfo("America/New_York")
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +17,7 @@ def init_scheduler(send_message_fn) -> AsyncIOScheduler:
     global _send_message_fn
     _send_message_fn = send_message_fn
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=TZ)
 
     for time_str in config.NEWS_FETCH_TIMES:
         hour, minute = map(int, time_str.split(":"))
