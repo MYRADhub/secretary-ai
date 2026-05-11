@@ -44,6 +44,26 @@ def delete_todo(todo_id: int) -> bool:
     return affected > 0
 
 
+def clear_all_todos() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM todos WHERE done = 0")
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected
+
+
+def complete_all_todos() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE todos SET done = 1 WHERE done = 0")
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected
+
+
 def format_todo_list(todos: list[dict]) -> str:
     if not todos:
         return "No pending tasks."
