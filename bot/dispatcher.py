@@ -12,8 +12,8 @@ _history: deque = deque(maxlen=HISTORY_MAX)
 INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters.
 
 Intents:
-- add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc.
-  params: {"text": "...", "priority": "high|medium|normal|low"}
+- add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc. Extract any tags (words starting with # or natural groupings like "for work", "personal").
+  params: {"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1", "tag2"]}
 - list_todos: show full task list with no filtering. params: {"include_done": true/false} — true if user says "show all", "everything", "including done"
 - filter_todos: user wants a filtered or sorted view — by keyword, person, priority, date, category, etc. params: {"query": "<the filter/sort description>", "include_done": true/false}
 - complete_todo: mark a task done. params: {"position": <int or null>}
@@ -24,6 +24,8 @@ Intents:
 - move_todo: reorder a task. params: {"from_position": <int>, "to_position": <int>}
   e.g. "move task 2 to top" → to_position: 1; "move task 1 to bottom" → to_position: 999
 - set_priority: set task priority. params: {"position": <int>, "priority": "high|medium|normal|low"}
+- set_tags: set or replace tags on a task. params: {"position": <int>, "tags": ["tag1", "tag2"]}
+- list_by_tag: show tasks with a specific tag. params: {"tag": "..."}
 - add_reminder: set a reminder. params: {"text": "...", "remind_at": "<ISO datetime>"}
 - list_reminders: list pending reminders
 - store_memory: store a behavioral rule ("remember that...")
@@ -89,10 +91,13 @@ async def dispatch(message: str) -> str:
     if intent == "add_todo":
         text = params.get("text", message)
         priority = params.get("priority", "normal")
-        result = todo.add_todo(text, priority)
+        tags = params.get("tags", [])
+        result = todo.add_todo(text, priority, tags)
         reply = f"Added: '{result['text']}'"
         if priority != "normal":
             reply += f" ({priority} priority)"
+        if result["tags"]:
+            reply += "  " + " ".join(f"#{t}" for t in result["tags"].split(",") if t)
 
     elif intent == "list_todos":
         include_done = params.get("include_done", False)
@@ -173,6 +178,24 @@ async def dispatch(message: str) -> str:
             reply = f"Priority set to {priority}." if success else f"No task at position {position}."
         else:
             reply = "Which task should I set priority on?"
+
+    elif intent == "set_tags":
+        position = params.get("position")
+        tags = params.get("tags", [])
+        if position and tags:
+            success = todo.set_tags(int(position), tags)
+            tag_str = " ".join(f"#{t}" for t in tags)
+            reply = f"Tags set: {tag_str}." if success else f"No task at position {position}."
+        else:
+            reply = "Tell me which task and what tags to set."
+
+    elif intent == "list_by_tag":
+        tag = params.get("tag", "")
+        if tag:
+            todos = todo.list_by_tag(tag)
+            reply = f"Tasks tagged #{tag.lstrip('#')}:\n" + todo.format_todo_list(todos) if todos else f"No tasks tagged #{tag.lstrip('#')}."
+        else:
+            reply = "Which tag should I filter by?"
 
     elif intent == "add_reminder":
         text = params.get("text", message)

@@ -5,35 +5,44 @@ PRIORITIES = {"high", "medium", "normal", "low"}
 PRIORITY_LABEL = {"high": "!", "medium": "~", "normal": "", "low": "v"}
 
 
+def _normalize_tags(tags: list[str] | str | None) -> str:
+    if not tags:
+        return ""
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.replace(",", " ").split()]
+    return ",".join(t.lstrip("#").lower() for t in tags if t)
+
+
 def _get_ordered(include_done: bool = False) -> list[dict]:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if include_done:
-        cur.execute("SELECT id, text, done, priority, order_index FROM todos ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags FROM todos ORDER BY order_index ASC")
     else:
-        cur.execute("SELECT id, text, done, priority, order_index FROM todos WHERE done = 0 ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags FROM todos WHERE done = 0 ORDER BY order_index ASC")
     rows = [dict(r) for r in cur.fetchall()]
     cur.close()
     conn.close()
     return rows
 
 
-def add_todo(text: str, priority: str = "normal") -> dict:
+def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None = None) -> dict:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT MAX(order_index) FROM todos")
     row = cur.fetchone()
     max_order = row["max"] if row["max"] is not None else 0
     order_index = max_order + 1
+    tags_str = _normalize_tags(tags)
     cur.execute(
-        "INSERT INTO todos (text, priority, order_index) VALUES (%s, %s, %s) RETURNING id",
-        (text, priority if priority in PRIORITIES else "normal", order_index),
+        "INSERT INTO todos (text, priority, order_index, tags) VALUES (%s, %s, %s, %s) RETURNING id",
+        (text, priority if priority in PRIORITIES else "normal", order_index, tags_str),
     )
     row_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
     conn.close()
-    return {"id": row_id, "text": text, "priority": priority}
+    return {"id": row_id, "text": text, "priority": priority, "tags": tags_str}
 
 
 def list_todos(include_done: bool = False) -> list[dict]:
@@ -41,6 +50,15 @@ def list_todos(include_done: bool = False) -> list[dict]:
     for i, row in enumerate(rows):
         row["position"] = i + 1
     return rows
+
+
+def list_by_tag(tag: str) -> list[dict]:
+    tag = tag.lstrip("#").lower()
+    rows = _get_ordered(include_done=False)
+    matched = [r for r in rows if tag in [t for t in r.get("tags", "").split(",") if t]]
+    for i, row in enumerate(matched):
+        row["position"] = rows.index(row) + 1
+    return matched
 
 
 def _get_by_position(position: int, include_done: bool = False) -> dict | None:
@@ -104,6 +122,20 @@ def set_priority(position: int, priority: str) -> bool:
     return True
 
 
+def set_tags(position: int, tags: list[str] | str) -> bool:
+    row = _get_by_position(position)
+    if not row:
+        return False
+    tags_str = _normalize_tags(tags)
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE todos SET tags = %s WHERE id = %s", (tags_str, row["id"]))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return True
+
+
 def move_todo(from_position: int, to_position: int) -> bool:
     rows = _get_ordered()
     if not (1 <= from_position <= len(rows)) or not (1 <= to_position <= len(rows)):
@@ -149,8 +181,10 @@ def format_todo_list(todos: list[dict]) -> str:
     lines = []
     for t in todos:
         pos = t.get("position", "?")
-        status = "✓" if t["done"] else "○"
+        status = "x" if t["done"] else " "
         priority_tag = PRIORITY_LABEL.get(t.get("priority", "normal"), "")
-        tag = f" [{priority_tag}]" if priority_tag else ""
-        lines.append(f"{pos}. {status}{tag} {t['text']}")
+        pri = f" [{priority_tag}]" if priority_tag else ""
+        raw_tags = t.get("tags", "")
+        tag_str = "  " + " ".join(f"#{tag}" for tag in raw_tags.split(",") if tag) if raw_tags else ""
+        lines.append(f"{pos}. [{status}]{pri} {t['text']}{tag_str}")
     return "\n".join(lines)

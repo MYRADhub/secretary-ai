@@ -19,8 +19,21 @@ def init_db() -> None:
             done INTEGER NOT NULL DEFAULT 0,
             priority TEXT NOT NULL DEFAULT 'normal',
             order_index REAL NOT NULL DEFAULT 0,
+            tags TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
+    """)
+
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'todos' AND column_name = 'tags'
+            ) THEN
+                ALTER TABLE todos ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+            END IF;
+        END $$
     """)
 
     cur.execute("""
