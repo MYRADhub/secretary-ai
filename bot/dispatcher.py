@@ -24,12 +24,12 @@ Return JSON only:
 {"intent": "<intent>", "params": {<relevant params>}}
 
 For add_reminder, params must include "text" and "remind_at" as ISO datetime string.
-Current datetime: {now}"""
+Current datetime: """
 
 
 async def parse_intent(message: str) -> dict:
     now = datetime.now().strftime("%Y-%m-%d %H:%M")
-    system = INTENT_SYSTEM.format(now=now)
+    system = INTENT_SYSTEM + now
 
     response = await chat(
         messages=[
