@@ -1,54 +1,31 @@
-import asyncio
-import re
-from openai import AsyncOpenAI, RateLimitError
+from openai import AsyncOpenAI
 import config
 
-# Gemini client via OpenAI-compatible endpoint
-_gemini_client: AsyncOpenAI | None = None
-
-# OpenAI client — used only for Whisper transcription
-_openai_client: AsyncOpenAI | None = None
+_client: AsyncOpenAI | None = None
 
 
-def get_gemini_client() -> AsyncOpenAI:
-    global _gemini_client
-    if _gemini_client is None:
-        _gemini_client = AsyncOpenAI(
-            api_key=config.GEMINI_API_KEY,
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
-        )
-    return _gemini_client
+def get_client() -> AsyncOpenAI:
+    global _client
+    if _client is None:
+        _client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+    return _client
 
 
-def get_openai_client() -> AsyncOpenAI:
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=config.OPENAI_API_KEY)
-    return _openai_client
+_NO_TEMPERATURE_MODELS = {"gpt-5-mini", "o1", "o1-mini", "o3", "o3-mini"}
 
 
 async def chat(messages: list[dict], model: str | None = None, temperature: float = 0.3) -> str:
-    client = get_gemini_client()
-    for attempt in range(2):
-        try:
-            response = await client.chat.completions.create(
-                model=model or config.GEMINI_MODEL,
-                messages=messages,
-                temperature=temperature,
-            )
-            return response.choices[0].message.content.strip()
-        except RateLimitError as e:
-            if attempt == 1:
-                raise
-            delay = 30
-            match = re.search(r"retry in (\d+)", str(e), re.IGNORECASE)
-            if match:
-                delay = int(match.group(1)) + 2
-            await asyncio.sleep(delay)
+    client = get_client()
+    resolved_model = model or config.OPENAI_MODEL
+    kwargs = {"model": resolved_model, "messages": messages}
+    if resolved_model not in _NO_TEMPERATURE_MODELS:
+        kwargs["temperature"] = temperature
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message.content.strip()
 
 
 async def transcribe(file_path: str) -> str:
-    client = get_openai_client()
+    client = get_client()
     with open(file_path, "rb") as f:
         response = await client.audio.transcriptions.create(
             model="whisper-1",
