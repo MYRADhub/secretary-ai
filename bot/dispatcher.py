@@ -6,31 +6,32 @@ from llm.client import chat
 from handlers import todo, reminder, memory
 
 HISTORY_MAX = 20
-
 _history: deque = deque(maxlen=HISTORY_MAX)
 
 INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters.
 
 Intents:
-- add_todo: adding a task. Extract ONLY the task itself, strip phrases like "add", "put", "remind me to", "to my list", etc.
-  e.g. "add buy milk to my list" → text: "buy milk"
-  e.g. "I need to call the dentist" → text: "call the dentist"
-- list_todos: user wants to see their task list
-- complete_todo: mark a task done. Extract id if mentioned, else null.
-- complete_all_todos: mark ALL tasks done
-- delete_todo: delete a specific task. Extract id.
-- clear_all_todos: delete ALL pending tasks (triggered by "clear all", "delete everything", "wipe my list", etc.)
-- add_reminder: set a reminder. Extract "text" (what to remind) and "remind_at" as ISO datetime string.
+- add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc.
+  params: {"text": "...", "priority": "high|medium|normal|low"}
+- list_todos: show task list. params: {"include_done": true/false} — true if user says "show all", "everything", "including done"
+- complete_todo: mark a task done. params: {"position": <int or null>}
+- complete_all_todos: mark all tasks done
+- delete_todo: delete one task. params: {"position": <int>}
+- clear_all_todos: delete all pending tasks
+- rename_todo: rename a task. params: {"position": <int>, "new_text": "..."}
+- move_todo: reorder a task. params: {"from_position": <int>, "to_position": <int>}
+  e.g. "move task 2 to top" → to_position: 1; "move task 1 to bottom" → to_position: 999
+- set_priority: set task priority. params: {"position": <int>, "priority": "high|medium|normal|low"}
+- add_reminder: set a reminder. params: {"text": "...", "remind_at": "<ISO datetime>"}
 - list_reminders: list pending reminders
-- store_memory: store a behavioral rule. Triggered by "remember that..."
+- store_memory: store a behavioral rule ("remember that...")
 - list_memories: list stored memories
-- delete_memory: delete a memory by id
+- delete_memory: delete a memory. params: {"id": <int>}
 - get_news: user wants tech news
-- general: anything else, conversation, questions
+- clear_history: user wants to reset/forget conversation history. Triggered by "forget this", "clear history", "start fresh", "new conversation", "ignore what we said", etc.
+- general: anything else
 
 Return JSON only: {"intent": "<intent>", "params": {}}
-
-For add_reminder params must include "text" and "remind_at" as ISO datetime.
 Current datetime: """
 
 
@@ -83,18 +84,22 @@ async def dispatch(message: str, send_news_fn=None) -> str:
 
     if intent == "add_todo":
         text = params.get("text", message)
-        result = todo.add_todo(text)
+        priority = params.get("priority", "normal")
+        result = todo.add_todo(text, priority)
         reply = f"Added: '{result['text']}'"
+        if priority != "normal":
+            reply += f" ({priority} priority)"
 
     elif intent == "list_todos":
-        todos = todo.list_todos()
+        include_done = params.get("include_done", False)
+        todos = todo.list_todos(include_done=include_done)
         reply = todo.format_todo_list(todos)
 
     elif intent == "complete_todo":
-        todo_id = params.get("id")
-        if todo_id:
-            success = todo.complete_todo(int(todo_id))
-            reply = "Done." if success else f"No task with id {todo_id}."
+        position = params.get("position")
+        if position:
+            success = todo.complete_todo(int(position))
+            reply = "Done." if success else f"No task at position {position}."
         else:
             todos = todo.list_todos()
             reply = "Which task?\n" + todo.format_todo_list(todos)
@@ -104,10 +109,10 @@ async def dispatch(message: str, send_news_fn=None) -> str:
         reply = f"Marked {count} task(s) as done."
 
     elif intent == "delete_todo":
-        todo_id = params.get("id")
-        if todo_id:
-            success = todo.delete_todo(int(todo_id))
-            reply = "Deleted." if success else f"No task with id {todo_id}."
+        position = params.get("position")
+        if position:
+            success = todo.delete_todo(int(position))
+            reply = "Deleted." if success else f"No task at position {position}."
         else:
             todos = todo.list_todos()
             reply = "Which task?\n" + todo.format_todo_list(todos)
@@ -115,6 +120,35 @@ async def dispatch(message: str, send_news_fn=None) -> str:
     elif intent == "clear_all_todos":
         count = todo.clear_all_todos()
         reply = f"Cleared {count} task(s)."
+
+    elif intent == "rename_todo":
+        position = params.get("position")
+        new_text = params.get("new_text")
+        if position and new_text:
+            success = todo.rename_todo(int(position), new_text)
+            reply = f"Renamed to '{new_text}'." if success else f"No task at position {position}."
+        else:
+            reply = "Tell me which task and what to rename it to."
+
+    elif intent == "move_todo":
+        from_pos = params.get("from_position")
+        to_pos = params.get("to_position")
+        if from_pos and to_pos:
+            todos = todo.list_todos()
+            actual_to = min(int(to_pos), len(todos))
+            success = todo.move_todo(int(from_pos), actual_to)
+            reply = "Moved." if success else "Couldn't move — check the positions."
+        else:
+            reply = "Tell me which task to move and where."
+
+    elif intent == "set_priority":
+        position = params.get("position")
+        priority = params.get("priority", "normal")
+        if position:
+            success = todo.set_priority(int(position), priority)
+            reply = f"Priority set to {priority}." if success else f"No task at position {position}."
+        else:
+            reply = "Which task should I set priority on?"
 
     elif intent == "add_reminder":
         text = params.get("text", message)
@@ -151,6 +185,10 @@ async def dispatch(message: str, send_news_fn=None) -> str:
 
     elif intent == "get_news":
         reply = await send_news_fn() if send_news_fn else "News unavailable."
+
+    elif intent == "clear_history":
+        _history.clear()
+        reply = "Conversation history cleared. Fresh start."
 
     else:
         system = "You are a helpful personal secretary. Be concise and direct."

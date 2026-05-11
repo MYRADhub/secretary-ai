@@ -15,6 +15,8 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             text TEXT NOT NULL,
             done INTEGER NOT NULL DEFAULT 0,
+            priority TEXT NOT NULL DEFAULT 'normal',
+            order_index REAL NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -41,6 +43,16 @@ def init_db() -> None:
             sent_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
+
+    # migrate existing tables that may not have the new columns
+    for col, definition in [("priority", "TEXT NOT NULL DEFAULT 'normal'"), ("order_index", "REAL NOT NULL DEFAULT 0")]:
+        try:
+            cur.execute(f"ALTER TABLE todos ADD COLUMN {col} {definition}")
+        except sqlite3.OperationalError:
+            pass
+
+    # seed order_index for any rows that have it at 0
+    cur.execute("UPDATE todos SET order_index = id WHERE order_index = 0")
 
     conn.commit()
     conn.close()
