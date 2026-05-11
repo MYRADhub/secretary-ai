@@ -47,14 +47,17 @@ def init_db() -> None:
     cur.execute("""
         CREATE TABLE IF NOT EXISTS news_sent (
             id SERIAL PRIMARY KEY,
-            item_url TEXT NOT NULL UNIQUE,
-            sent_at TIMESTAMP NOT NULL DEFAULT NOW()
+            item_url TEXT NOT NULL,
+            category TEXT NOT NULL DEFAULT 'tech',
+            sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (item_url, category)
         )
     """)
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS news_digests (
             id SERIAL PRIMARY KEY,
+            category TEXT NOT NULL DEFAULT 'tech',
             digest TEXT NOT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
@@ -62,13 +65,62 @@ def init_db() -> None:
 
     cur.execute("""
         CREATE TABLE IF NOT EXISTS news_preferences (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
+            id INTEGER PRIMARY KEY,
+            category TEXT NOT NULL DEFAULT 'tech',
             topics_follow TEXT NOT NULL DEFAULT '',
-            topics_skip TEXT NOT NULL DEFAULT ''
+            topics_skip TEXT NOT NULL DEFAULT '',
+            UNIQUE (id, category)
         )
     """)
 
-    cur.execute("INSERT INTO news_preferences (id) VALUES (1) ON CONFLICT DO NOTHING")
+    # Migrate news_sent: drop old unique constraint on item_url alone if it exists,
+    # add category column if missing
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'news_sent' AND column_name = 'category'
+            ) THEN
+                ALTER TABLE news_sent ADD COLUMN category TEXT NOT NULL DEFAULT 'tech';
+                ALTER TABLE news_sent DROP CONSTRAINT IF EXISTS news_sent_item_url_key;
+                ALTER TABLE news_sent ADD CONSTRAINT news_sent_item_url_category_key UNIQUE (item_url, category);
+            END IF;
+        END $$
+    """)
+
+    # Migrate news_digests: add category column if missing
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'news_digests' AND column_name = 'category'
+            ) THEN
+                ALTER TABLE news_digests ADD COLUMN category TEXT NOT NULL DEFAULT 'tech';
+            END IF;
+        END $$
+    """)
+
+    # Migrate news_preferences: add category column if missing, re-key
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'news_preferences' AND column_name = 'category'
+            ) THEN
+                ALTER TABLE news_preferences ADD COLUMN category TEXT NOT NULL DEFAULT 'tech';
+            END IF;
+        END $$
+    """)
+
+    cur.execute(
+        "INSERT INTO news_preferences (id, category) VALUES (1, 'tech') ON CONFLICT DO NOTHING"
+    )
+    cur.execute(
+        "INSERT INTO news_preferences (id, category) VALUES (2, 'finance') ON CONFLICT DO NOTHING"
+    )
 
     conn.commit()
     cur.close()

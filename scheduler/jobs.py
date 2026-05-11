@@ -19,11 +19,18 @@ def init_scheduler(send_message_fn) -> AsyncIOScheduler:
     for time_str in config.NEWS_FETCH_TIMES:
         hour, minute = map(int, time_str.split(":"))
         scheduler.add_job(
-            _run_news_digest,
+            _run_tech_digest,
             trigger="cron",
             hour=hour,
             minute=minute,
-            id=f"news_{time_str}",
+            id=f"news_tech_{time_str}",
+        )
+        scheduler.add_job(
+            _run_finance_digest,
+            trigger="cron",
+            hour=hour,
+            minute=minute,
+            id=f"news_finance_{time_str}",
         )
 
     scheduler.add_job(
@@ -36,14 +43,24 @@ def init_scheduler(send_message_fn) -> AsyncIOScheduler:
     return scheduler
 
 
-async def _run_news_digest() -> None:
+async def _run_tech_digest() -> None:
     if _send_message_fn is None:
         return
     try:
-        digest = await fetch_and_summarize()
+        digest = await fetch_and_summarize("tech")
         await _send_message_fn(digest)
     except Exception:
-        logger.exception("Failed to fetch/send news digest")
+        logger.exception("Failed to fetch/send tech digest")
+
+
+async def _run_finance_digest() -> None:
+    if _send_message_fn is None:
+        return
+    try:
+        digest = await fetch_and_summarize("finance")
+        await _send_message_fn(digest)
+    except Exception:
+        logger.exception("Failed to fetch/send finance digest")
 
 
 async def _check_reminders() -> None:

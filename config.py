@@ -17,4 +17,10 @@ NEWS_FEEDS = [
     "https://techcrunch.com/feed/",
 ]
 
+FINANCE_FEEDS = [
+    "https://feeds.finance.yahoo.com/rss/2.0/headline",
+    "https://feeds.marketwatch.com/marketwatch/topstories/",
+    "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+]
+
 DATABASE_URL = os.getenv("DATABASE_URL")

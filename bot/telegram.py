@@ -2,7 +2,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from bot.dispatcher import dispatch
-from handlers.news import fetch_and_summarize, chunk_message
+from handlers.news import chunk_message
 import config
 
 def _chunk(text: str) -> list[str]:
@@ -29,7 +29,7 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     try:
-        response = await dispatch(text, send_news_fn=fetch_and_summarize)
+        response = await dispatch(text)
         for chunk in _chunk(response):
             await update.message.reply_text(chunk)
     except Exception:
