@@ -174,6 +174,16 @@ def init_db() -> None:
         "INSERT INTO news_preferences (id, category) VALUES (2, 'finance') ON CONFLICT DO NOTHING"
     )
 
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS curriculum_progress (
+            id SERIAL PRIMARY KEY,
+            module_num INTEGER NOT NULL,
+            lesson_num INTEGER NOT NULL,
+            completed_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            UNIQUE (module_num, lesson_num)
+        )
+    """)
+
     conn.commit()
     cur.close()
     conn.close()

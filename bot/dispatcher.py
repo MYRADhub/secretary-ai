@@ -8,9 +8,10 @@ from handlers import todo, reminder, memory
 from handlers.news import get_recent_digests, update_preferences, fetch_and_summarize
 from handlers.search import web_search
 from handlers import calendar
+from handlers import curriculum
 
 TZ = ZoneInfo("America/New_York")
-HISTORY_MAX = 20
+HISTORY_MAX = 100
 _history: deque = deque(maxlen=HISTORY_MAX)
 
 INTENT_SYSTEM_TEMPLATE = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters. Also check if any stored memory rules apply.
@@ -45,6 +46,9 @@ Intents:
 - list_events: list upcoming calendar events. params: {{"days": <int, default 7>}}
 - create_event: add a calendar event. params: {{"summary": "...", "start": "<ISO datetime>", "end": "<ISO datetime>", "description": "...", "location": "..."}}
 - delete_event: delete a calendar event by id. params: {{"id": "...", "query": "..."}} — use query if id unknown
+- next_lesson: user wants the next lesson in the curriculum. no params.
+- current_lesson: user wants to re-read or revisit the current/last lesson. no params.
+- lesson_status: user wants to see their curriculum progress. no params.
 - clear_history: reset conversation history
 - general: anything else
 
@@ -401,6 +405,15 @@ async def dispatch(message: str) -> str:
                 reply = f"Couldn't delete event: {e}"
         else:
             reply = "Which event should I delete?"
+
+    elif intent == "next_lesson":
+        reply = await curriculum.deliver_next_lesson(mark_done=True)
+
+    elif intent == "current_lesson":
+        reply = await curriculum.deliver_current_lesson()
+
+    elif intent == "lesson_status":
+        reply = curriculum.get_status()
 
     elif intent == "clear_history":
         _history.clear()

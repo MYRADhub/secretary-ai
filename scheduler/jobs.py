@@ -4,6 +4,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers.news import fetch_and_summarize
 from handlers.reminder import get_due_reminders, mark_reminder_sent
 from handlers.briefing import morning_briefing, midday_briefing
+from handlers.curriculum import deliver_next_lesson, get_next_lesson
 from zoneinfo import ZoneInfo
 import config
 
@@ -66,6 +67,14 @@ def init_scheduler(send_message_fn) -> AsyncIOScheduler:
         hour=8,
         minute=0,
         id="due_soon_check",
+    )
+
+    scheduler.add_job(
+        _deliver_daily_lesson,
+        trigger="cron",
+        hour=12,
+        minute=0,
+        id="daily_lesson",
     )
 
     return scheduler
@@ -134,3 +143,15 @@ async def _check_due_soon() -> None:
             await _send_message_fn(text)
     except Exception:
         logger.exception("Failed to check due soon")
+
+
+async def _deliver_daily_lesson() -> None:
+    if _send_message_fn is None:
+        return
+    try:
+        if get_next_lesson() is None:
+            return
+        text = await deliver_next_lesson(mark_done=True)
+        await _send_message_fn(text)
+    except Exception:
+        logger.exception("Failed to deliver daily lesson")
