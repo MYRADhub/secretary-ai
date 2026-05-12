@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 from storage.db import get_conn
 import psycopg2.extras
+
+RECURRENCE_RULES = {"daily", "weekly", "monthly", "weekdays"}
 
 PRIORITIES = {"high", "medium", "normal", "low"}
 PRIORITY_LABEL = {"high": "!", "medium": "~", "normal": "", "low": "v"}
@@ -18,16 +20,42 @@ def _get_ordered(include_done: bool = False) -> list[dict]:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if include_done:
-        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date FROM todos ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date, recurrence_rule, recurrence_interval FROM todos ORDER BY order_index ASC")
     else:
-        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date FROM todos WHERE done = 0 ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date, recurrence_rule, recurrence_interval FROM todos WHERE done = 0 ORDER BY order_index ASC")
     rows = [dict(r) for r in cur.fetchall()]
     cur.close()
     conn.close()
     return rows
 
 
-def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None = None, due_date: str | None = None) -> dict:
+def _next_due_date(current: date, rule: str, interval: int) -> date:
+    if rule == "daily":
+        return current + timedelta(days=interval)
+    if rule == "weekly":
+        return current + timedelta(weeks=interval)
+    if rule == "monthly":
+        month = current.month - 1 + interval
+        year = current.year + month // 12
+        month = month % 12 + 1
+        day = min(current.day, [31,29,31,30,31,30,31,31,30,31,30,31][month-1])
+        return current.replace(year=year, month=month, day=day)
+    if rule == "weekdays":
+        next_day = current + timedelta(days=1)
+        while next_day.weekday() >= 5:
+            next_day += timedelta(days=1)
+        return next_day
+    return current + timedelta(days=interval)
+
+
+def add_todo(
+    text: str,
+    priority: str = "normal",
+    tags: list[str] | str | None = None,
+    due_date: str | None = None,
+    recurrence_rule: str | None = None,
+    recurrence_interval: int = 1,
+) -> dict:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT MAX(order_index) FROM todos")
@@ -41,15 +69,17 @@ def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None =
             parsed_due = date.fromisoformat(due_date)
         except ValueError:
             pass
+    rule = recurrence_rule if recurrence_rule in RECURRENCE_RULES else None
     cur.execute(
-        "INSERT INTO todos (text, priority, order_index, tags, due_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-        (text, priority if priority in PRIORITIES else "normal", order_index, tags_str, parsed_due),
+        "INSERT INTO todos (text, priority, order_index, tags, due_date, recurrence_rule, recurrence_interval) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+        (text, priority if priority in PRIORITIES else "normal", order_index, tags_str, parsed_due, rule, recurrence_interval),
     )
     row_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
     conn.close()
-    return {"id": row_id, "text": text, "priority": priority, "tags": tags_str, "due_date": parsed_due}
+    return {"id": row_id, "text": text, "priority": priority, "tags": tags_str, "due_date": parsed_due, "recurrence_rule": rule}
 
 
 def list_todos(include_done: bool = False) -> list[dict]:
@@ -75,13 +105,49 @@ def _get_by_position(position: int, include_done: bool = False) -> dict | None:
     return None
 
 
-def complete_todo(position: int) -> bool:
+def complete_todo(position: int) -> dict:
+    row = _get_by_position(position)
+    if not row:
+        return {"success": False}
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE todos SET done = 1 WHERE id = %s", (row["id"],))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    result = {"success": True, "next_due": None}
+    rule = row.get("recurrence_rule")
+    if rule:
+        interval = row.get("recurrence_interval") or 1
+        current_due = row.get("due_date") or date.today()
+        if isinstance(current_due, str):
+            current_due = date.fromisoformat(current_due)
+        next_due = _next_due_date(current_due, rule, interval)
+        add_todo(
+            text=row["text"],
+            priority=row.get("priority", "normal"),
+            tags=row.get("tags", ""),
+            due_date=next_due.isoformat(),
+            recurrence_rule=rule,
+            recurrence_interval=interval,
+        )
+        result["next_due"] = next_due
+    return result
+
+
+def set_recurrence(position: int, rule: str | None, interval: int = 1) -> bool:
+    if rule is not None and rule not in RECURRENCE_RULES:
+        return False
     row = _get_by_position(position)
     if not row:
         return False
     conn = get_conn()
     cur = conn.cursor()
-    cur.execute("UPDATE todos SET done = 1 WHERE id = %s", (row["id"],))
+    cur.execute(
+        "UPDATE todos SET recurrence_rule = %s, recurrence_interval = %s WHERE id = %s",
+        (rule, interval, row["id"]),
+    )
     conn.commit()
     cur.close()
     conn.close()
@@ -241,5 +307,16 @@ def format_todo_list(todos: list[dict]) -> str:
                 due_str = f"  (due {due.strftime('%b %d')})"
         else:
             due_str = ""
-        lines.append(f"{pos}. [{status}]{pri} {t['text']}{tag_str}{due_str}")
+        recur = t.get("recurrence_rule")
+        interval = t.get("recurrence_interval") or 1
+        if recur:
+            if recur == "weekdays":
+                recur_str = "  (repeats weekdays)"
+            elif interval == 1:
+                recur_str = f"  (repeats {recur})"
+            else:
+                recur_str = f"  (repeats every {interval} {recur.rstrip('ly')}s)"
+        else:
+            recur_str = ""
+        lines.append(f"{pos}. [{status}]{pri} {t['text']}{tag_str}{due_str}{recur_str}")
     return "\n".join(lines)

@@ -40,6 +40,18 @@ def init_db() -> None:
             ) THEN
                 ALTER TABLE todos ADD COLUMN due_date DATE DEFAULT NULL;
             END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'todos' AND column_name = 'recurrence_rule'
+            ) THEN
+                ALTER TABLE todos ADD COLUMN recurrence_rule TEXT DEFAULT NULL;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'todos' AND column_name = 'recurrence_interval'
+            ) THEN
+                ALTER TABLE todos ADD COLUMN recurrence_interval INTEGER DEFAULT 1;
+            END IF;
         END $$
     """)
 
@@ -49,8 +61,21 @@ def init_db() -> None:
             text TEXT NOT NULL,
             remind_at TIMESTAMP NOT NULL,
             sent INTEGER NOT NULL DEFAULT 0,
+            snoozed_until TIMESTAMP DEFAULT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
+    """)
+
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'reminders' AND column_name = 'snoozed_until'
+            ) THEN
+                ALTER TABLE reminders ADD COLUMN snoozed_until TIMESTAMP DEFAULT NULL;
+            END IF;
+        END $$
     """)
 
     cur.execute("""

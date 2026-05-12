@@ -21,12 +21,29 @@ def get_due_reminders() -> list[dict]:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
-        "SELECT id, text, remind_at FROM reminders WHERE sent = 0 AND remind_at <= NOW()",
+        "SELECT id, text, remind_at FROM reminders "
+        "WHERE sent = 0 AND remind_at <= NOW() "
+        "AND (snoozed_until IS NULL OR snoozed_until <= NOW())",
     )
     rows = [dict(r) for r in cur.fetchall()]
     cur.close()
     conn.close()
     return rows
+
+
+def snooze_reminder(reminder_id: int, minutes: int) -> bool:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE reminders SET sent = 0, snoozed_until = NOW() + (%s * INTERVAL '1 minute') "
+        "WHERE id = %s",
+        (minutes, reminder_id),
+    )
+    affected = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    return affected > 0
 
 
 def mark_reminder_sent(reminder_id: int) -> None:
