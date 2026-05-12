@@ -12,41 +12,40 @@ TZ = ZoneInfo("America/New_York")
 HISTORY_MAX = 20
 _history: deque = deque(maxlen=HISTORY_MAX)
 
-INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters. Also check if any stored memory rules apply.
+INTENT_SYSTEM_TEMPLATE = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters. Also check if any stored memory rules apply.
 
 Intents:
 - add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc. Extract tags and due date if mentioned.
-  params: {"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1"], "due_date": "YYYY-MM-DD or null"}
-- list_todos: show full task list with no filtering. params: {"include_done": true/false}
-- filter_todos: user wants a filtered or sorted view. params: {"query": "...", "include_done": true/false}
-- complete_todo: mark a task done. params: {"position": <int or null>}
+  params: {{"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1"], "due_date": "YYYY-MM-DD or null"}}
+- list_todos: show full task list with no filtering. params: {{"include_done": true/false}}
+- filter_todos: user wants a filtered or sorted view. params: {{"query": "...", "include_done": true/false}}
+- complete_todo: mark a task done. params: {{"position": <int or null>}}
 - complete_all_todos: mark all tasks done
-- delete_todo: delete one task. params: {"position": <int>}
+- delete_todo: delete one task. params: {{"position": <int>}}
 - clear_all_todos: delete all pending tasks
-- rename_todo: rename a task. params: {"position": <int>, "new_text": "..."}
-- move_todo: reorder a task. params: {"from_position": <int>, "to_position": <int>}
-  e.g. "move task 2 to top" → to_position: 1; "move task 1 to bottom" → to_position: 999
-- set_priority: set task priority. params: {"position": <int>, "priority": "high|medium|normal|low"}
-- set_tags: set or replace tags on a task. params: {"position": <int>, "tags": ["tag1", "tag2"]}
-- list_by_tag: show tasks with a specific tag. params: {"tag": "..."}
-- set_due_date: set or clear a due date on a task. params: {"position": <int>, "due_date": "YYYY-MM-DD or null"}
-- add_reminder: set a reminder. params: {"text": "...", "remind_at": "<ISO datetime>"}
+- rename_todo: rename a task. params: {{"position": <int>, "new_text": "..."}}
+- move_todo: reorder a task. params: {{"from_position": <int>, "to_position": <int>}}
+  e.g. "move task 2 to top" to_position: 1; "move task 1 to bottom" to_position: 999
+- set_priority: set task priority. params: {{"position": <int>, "priority": "high|medium|normal|low"}}
+- set_tags: set or replace tags on a task. params: {{"position": <int>, "tags": ["tag1", "tag2"]}}
+- list_by_tag: show tasks with a specific tag. params: {{"tag": "..."}}
+- set_due_date: set or clear a due date on a task. params: {{"position": <int>, "due_date": "YYYY-MM-DD or null"}}
+- add_reminder: set a reminder. params: {{"text": "...", "remind_at": "<ISO datetime>"}}
 - list_reminders: list pending reminders
 - store_memory: store a behavioral rule ("remember that...")
 - list_memories: list stored memories
-- delete_memory: delete a memory. params: {"id": <int>}
-- get_news: user wants news now. params: {"category": "tech|finance"}
-- news_recall: user asks about a past digest. params: {"category": "tech|finance"}
-- news_preferences: user wants to change news topics. params: {"category": "tech|finance", "follow": "...", "skip": "..."}
-- web_search: user wants to search the web or asks a factual question. params: {"query": "..."}
+- delete_memory: delete a memory. params: {{"id": <int>}}
+- get_news: user wants news now. params: {{"category": "tech|finance"}}
+- news_recall: user asks about a past digest. params: {{"category": "tech|finance"}}
+- news_preferences: user wants to change news topics. params: {{"category": "tech|finance", "follow": "...", "skip": "..."}}
+- web_search: user wants to search the web or asks a factual question. params: {{"query": "..."}}
 - clear_history: reset conversation history
 - general: anything else
 
 Memory rules (check if any apply to this message):
 {memory_rules}
 
-Return JSON only:
-{{"intent": "<intent>", "params": {{}}, "matched_memory_id": <id or null>}}
+Return JSON only: {{"intent": "<intent>", "params": {{}}, "matched_memory_id": <id or null>}}
 Current datetime: """
 
 
@@ -60,7 +59,7 @@ def _get_memory_rules_text() -> str:
 async def parse_intent(message: str) -> tuple[dict, list[dict]]:
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     memory_rules_text = _get_memory_rules_text()
-    system = INTENT_SYSTEM.format(memory_rules=memory_rules_text) + now
+    system = INTENT_SYSTEM_TEMPLATE.format(memory_rules=memory_rules_text) + now
 
     messages = [{"role": "system", "content": system}]
     messages += list(_history)
