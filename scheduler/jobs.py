@@ -3,6 +3,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from handlers.news import fetch_and_summarize
 from handlers.reminder import get_due_reminders, mark_reminder_sent
+from handlers.briefing import morning_briefing, midday_briefing
 from zoneinfo import ZoneInfo
 import config
 
@@ -43,6 +44,30 @@ def init_scheduler(send_message_fn) -> AsyncIOScheduler:
         id="reminder_check",
     )
 
+    scheduler.add_job(
+        _run_morning_briefing,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        id="morning_briefing",
+    )
+
+    scheduler.add_job(
+        _run_midday_briefing,
+        trigger="cron",
+        hour=15,
+        minute=0,
+        id="midday_briefing",
+    )
+
+    scheduler.add_job(
+        _check_due_soon,
+        trigger="cron",
+        hour=8,
+        minute=0,
+        id="due_soon_check",
+    )
+
     return scheduler
 
 
@@ -76,3 +101,36 @@ async def _check_reminders() -> None:
             mark_reminder_sent(r["id"])
     except Exception:
         logger.exception("Failed to check reminders")
+
+
+async def _run_morning_briefing() -> None:
+    if _send_message_fn is None:
+        return
+    try:
+        text = await morning_briefing()
+        await _send_message_fn(text)
+    except Exception:
+        logger.exception("Failed to send morning briefing")
+
+
+async def _run_midday_briefing() -> None:
+    if _send_message_fn is None:
+        return
+    try:
+        text = await midday_briefing()
+        await _send_message_fn(text)
+    except Exception:
+        logger.exception("Failed to send midday briefing")
+
+
+async def _check_due_soon() -> None:
+    if _send_message_fn is None:
+        return
+    try:
+        from handlers.todo import get_due_soon, format_todo_list
+        due = get_due_soon(days=1)
+        if due:
+            text = "Tasks due today or tomorrow:\n" + format_todo_list(due)
+            await _send_message_fn(text)
+    except Exception:
+        logger.exception("Failed to check due soon")

@@ -20,6 +20,7 @@ def init_db() -> None:
             priority TEXT NOT NULL DEFAULT 'normal',
             order_index REAL NOT NULL DEFAULT 0,
             tags TEXT NOT NULL DEFAULT '',
+            due_date DATE DEFAULT NULL,
             created_at TIMESTAMP NOT NULL DEFAULT NOW()
         )
     """)
@@ -32,6 +33,12 @@ def init_db() -> None:
                 WHERE table_name = 'todos' AND column_name = 'tags'
             ) THEN
                 ALTER TABLE todos ADD COLUMN tags TEXT NOT NULL DEFAULT '';
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'todos' AND column_name = 'due_date'
+            ) THEN
+                ALTER TABLE todos ADD COLUMN due_date DATE DEFAULT NULL;
             END IF;
         END $$
     """)

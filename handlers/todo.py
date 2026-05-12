@@ -1,3 +1,4 @@
+from datetime import date
 from storage.db import get_conn
 import psycopg2.extras
 
@@ -17,16 +18,16 @@ def _get_ordered(include_done: bool = False) -> list[dict]:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     if include_done:
-        cur.execute("SELECT id, text, done, priority, order_index, tags FROM todos ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date FROM todos ORDER BY order_index ASC")
     else:
-        cur.execute("SELECT id, text, done, priority, order_index, tags FROM todos WHERE done = 0 ORDER BY order_index ASC")
+        cur.execute("SELECT id, text, done, priority, order_index, tags, due_date FROM todos WHERE done = 0 ORDER BY order_index ASC")
     rows = [dict(r) for r in cur.fetchall()]
     cur.close()
     conn.close()
     return rows
 
 
-def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None = None) -> dict:
+def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None = None, due_date: str | None = None) -> dict:
     conn = get_conn()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute("SELECT MAX(order_index) FROM todos")
@@ -34,15 +35,21 @@ def add_todo(text: str, priority: str = "normal", tags: list[str] | str | None =
     max_order = row["max"] if row["max"] is not None else 0
     order_index = max_order + 1
     tags_str = _normalize_tags(tags)
+    parsed_due = None
+    if due_date:
+        try:
+            parsed_due = date.fromisoformat(due_date)
+        except ValueError:
+            pass
     cur.execute(
-        "INSERT INTO todos (text, priority, order_index, tags) VALUES (%s, %s, %s, %s) RETURNING id",
-        (text, priority if priority in PRIORITIES else "normal", order_index, tags_str),
+        "INSERT INTO todos (text, priority, order_index, tags, due_date) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+        (text, priority if priority in PRIORITIES else "normal", order_index, tags_str, parsed_due),
     )
     row_id = cur.fetchone()["id"]
     conn.commit()
     cur.close()
     conn.close()
-    return {"id": row_id, "text": text, "priority": priority, "tags": tags_str}
+    return {"id": row_id, "text": text, "priority": priority, "tags": tags_str, "due_date": parsed_due}
 
 
 def list_todos(include_done: bool = False) -> list[dict]:
@@ -122,6 +129,38 @@ def set_priority(position: int, priority: str) -> bool:
     return True
 
 
+def set_due_date(position: int, due_date: str | None) -> bool:
+    row = _get_by_position(position)
+    if not row:
+        return False
+    parsed_due = None
+    if due_date:
+        try:
+            parsed_due = date.fromisoformat(due_date)
+        except ValueError:
+            return False
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE todos SET due_date = %s WHERE id = %s", (parsed_due, row["id"]))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return True
+
+
+def get_due_soon(days: int = 1) -> list[dict]:
+    conn = get_conn()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute(
+        "SELECT id, text, priority, tags, due_date FROM todos WHERE done = 0 AND due_date IS NOT NULL AND due_date <= CURRENT_DATE + %s ORDER BY due_date ASC",
+        (days,),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
+
+
 def set_tags(position: int, tags: list[str] | str) -> bool:
     row = _get_by_position(position)
     if not row:
@@ -178,6 +217,7 @@ def complete_all_todos() -> int:
 def format_todo_list(todos: list[dict]) -> str:
     if not todos:
         return "No tasks."
+    today = date.today()
     lines = []
     for t in todos:
         pos = t.get("position", "?")
@@ -186,5 +226,20 @@ def format_todo_list(todos: list[dict]) -> str:
         pri = f" [{priority_tag}]" if priority_tag else ""
         raw_tags = t.get("tags", "")
         tag_str = "  " + " ".join(f"#{tag}" for tag in raw_tags.split(",") if tag) if raw_tags else ""
-        lines.append(f"{pos}. [{status}]{pri} {t['text']}{tag_str}")
+        due = t.get("due_date")
+        if due:
+            if isinstance(due, str):
+                due = date.fromisoformat(due)
+            delta = (due - today).days
+            if delta < 0:
+                due_str = f"  (overdue {abs(delta)}d)"
+            elif delta == 0:
+                due_str = "  (due today)"
+            elif delta == 1:
+                due_str = "  (due tomorrow)"
+            else:
+                due_str = f"  (due {due.strftime('%b %d')})"
+        else:
+            due_str = ""
+        lines.append(f"{pos}. [{status}]{pri} {t['text']}{tag_str}{due_str}")
     return "\n".join(lines)

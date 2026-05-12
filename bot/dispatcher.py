@@ -4,21 +4,21 @@ from collections import deque
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from llm.client import chat
-
-TZ = ZoneInfo("America/New_York")
 from handlers import todo, reminder, memory
 from handlers.news import get_recent_digests, update_preferences, fetch_and_summarize
+from handlers.search import web_search
 
+TZ = ZoneInfo("America/New_York")
 HISTORY_MAX = 20
 _history: deque = deque(maxlen=HISTORY_MAX)
 
-INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters.
+INTENT_SYSTEM = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters. Also check if any stored memory rules apply.
 
 Intents:
-- add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc. Extract any tags (words starting with # or natural groupings like "for work", "personal").
-  params: {"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1", "tag2"]}
-- list_todos: show full task list with no filtering. params: {"include_done": true/false} — true if user says "show all", "everything", "including done"
-- filter_todos: user wants a filtered or sorted view — by keyword, person, priority, date, category, etc. params: {"query": "<the filter/sort description>", "include_done": true/false}
+- add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc. Extract tags and due date if mentioned.
+  params: {"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1"], "due_date": "YYYY-MM-DD or null"}
+- list_todos: show full task list with no filtering. params: {"include_done": true/false}
+- filter_todos: user wants a filtered or sorted view. params: {"query": "...", "include_done": true/false}
 - complete_todo: mark a task done. params: {"position": <int or null>}
 - complete_all_todos: mark all tasks done
 - delete_todo: delete one task. params: {"position": <int>}
@@ -29,24 +29,38 @@ Intents:
 - set_priority: set task priority. params: {"position": <int>, "priority": "high|medium|normal|low"}
 - set_tags: set or replace tags on a task. params: {"position": <int>, "tags": ["tag1", "tag2"]}
 - list_by_tag: show tasks with a specific tag. params: {"tag": "..."}
+- set_due_date: set or clear a due date on a task. params: {"position": <int>, "due_date": "YYYY-MM-DD or null"}
 - add_reminder: set a reminder. params: {"text": "...", "remind_at": "<ISO datetime>"}
 - list_reminders: list pending reminders
 - store_memory: store a behavioral rule ("remember that...")
 - list_memories: list stored memories
 - delete_memory: delete a memory. params: {"id": <int>}
-- get_news: user wants news now. params: {"category": "tech|finance"} — default "tech" unless user says "finance", "market", "stocks", "economy", etc.
-- news_recall: user asks about a past digest. params: {"category": "tech|finance"} — infer from context, default "tech"
-- news_preferences: user wants to change what news topics to follow or skip. params: {"category": "tech|finance", "follow": "...", "skip": "..."} — category default "tech", include only what was mentioned
-- clear_history: user wants to reset/forget conversation history. Triggered by "forget this", "clear history", "start fresh", "new conversation", "ignore what we said", etc.
+- get_news: user wants news now. params: {"category": "tech|finance"}
+- news_recall: user asks about a past digest. params: {"category": "tech|finance"}
+- news_preferences: user wants to change news topics. params: {"category": "tech|finance", "follow": "...", "skip": "..."}
+- web_search: user wants to search the web or asks a factual question. params: {"query": "..."}
+- clear_history: reset conversation history
 - general: anything else
 
-Return JSON only: {"intent": "<intent>", "params": {}}
+Memory rules (check if any apply to this message):
+{memory_rules}
+
+Return JSON only:
+{{"intent": "<intent>", "params": {{}}, "matched_memory_id": <id or null>}}
 Current datetime: """
 
 
-async def parse_intent(message: str) -> dict:
+def _get_memory_rules_text() -> str:
+    memories = memory.get_all_memories()
+    if not memories:
+        return "None stored."
+    return "\n".join(f"ID {m['id']}: {m['trigger_pattern']}" for m in memories)
+
+
+async def parse_intent(message: str) -> tuple[dict, list[dict]]:
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-    system = INTENT_SYSTEM + now
+    memory_rules_text = _get_memory_rules_text()
+    system = INTENT_SYSTEM.format(memory_rules=memory_rules_text) + now
 
     messages = [{"role": "system", "content": system}]
     messages += list(_history)
@@ -55,52 +69,69 @@ async def parse_intent(message: str) -> dict:
     response = await chat(messages=messages)
 
     try:
-        return json.loads(response)
+        parsed = json.loads(response)
     except json.JSONDecodeError:
         match = re.search(r"\{.*\}", response, re.DOTALL)
         if match:
-            return json.loads(match.group())
-        return {"intent": "general", "params": {}}
+            parsed = json.loads(match.group())
+        else:
+            parsed = {"intent": "general", "params": {}, "matched_memory_id": None}
+
+    matched_memory_id = parsed.pop("matched_memory_id", None)
+    matched_memories = []
+    if matched_memory_id:
+        all_memories = memory.get_all_memories()
+        matched_memories = [m for m in all_memories if m["id"] == matched_memory_id]
+
+    return parsed, matched_memories
 
 
 async def dispatch(message: str) -> str:
-    matched_memories = await memory.match_memories(message)
+    parsed, matched_memories = await parse_intent(message)
+    intent = parsed.get("intent", "general")
+    params = parsed.get("params", {})
+
     if matched_memories:
         mem = matched_memories[0]
         action = mem["action_type"]
-        params = mem["action_params"]
+        mem_params = mem["action_params"]
 
         if action == "set_reminder":
             time_match = re.search(r"(\d{1,2})(?::(\d{2}))?", message)
             if time_match:
                 hour = int(time_match.group(1))
                 minute = int(time_match.group(2) or 0)
-                offset = params.get("offset_minutes", 0)
+                offset = mem_params.get("offset_minutes", 0)
                 remind_dt = datetime.now(TZ).replace(hour=hour, minute=minute, second=0, microsecond=0)
                 remind_dt += timedelta(minutes=offset)
-                label = params.get("label", message)
+                label = mem_params.get("label", message)
                 result = reminder.add_reminder(label, remind_dt)
-                return f"Reminder set: '{result['text']}' at {remind_dt.strftime('%H:%M')} (from memory rule)"
+                reply = f"Reminder set: '{result['text']}' at {remind_dt.strftime('%H:%M')} (from memory rule)"
+                _history.append({"role": "user", "content": message})
+                _history.append({"role": "assistant", "content": reply})
+                return reply
 
         elif action == "add_todo":
-            prefix = params.get("prefix", "")
+            prefix = mem_params.get("prefix", "")
             result = todo.add_todo(f"{prefix}{message}")
-            return f"Added: '{result['text']}'"
-
-    parsed = await parse_intent(message)
-    intent = parsed.get("intent", "general")
-    params = parsed.get("params", {})
+            reply = f"Added: '{result['text']}'"
+            _history.append({"role": "user", "content": message})
+            _history.append({"role": "assistant", "content": reply})
+            return reply
 
     if intent == "add_todo":
         text = params.get("text", message)
         priority = params.get("priority", "normal")
         tags = params.get("tags", [])
-        result = todo.add_todo(text, priority, tags)
+        due_date = params.get("due_date")
+        result = todo.add_todo(text, priority, tags, due_date)
         reply = f"Added: '{result['text']}'"
         if priority != "normal":
             reply += f" ({priority} priority)"
         if result["tags"]:
             reply += "  " + " ".join(f"#{t}" for t in result["tags"].split(",") if t)
+        if result["due_date"]:
+            reply += f"  (due {result['due_date']})"
 
     elif intent == "list_todos":
         include_done = params.get("include_done", False)
@@ -200,6 +231,18 @@ async def dispatch(message: str) -> str:
         else:
             reply = "Which tag should I filter by?"
 
+    elif intent == "set_due_date":
+        position = params.get("position")
+        due_date = params.get("due_date")
+        if position:
+            success = todo.set_due_date(int(position), due_date)
+            if success:
+                reply = f"Due date set to {due_date}." if due_date else "Due date cleared."
+            else:
+                reply = f"No task at position {position}."
+        else:
+            reply = "Which task should I set a due date on?"
+
     elif intent == "add_reminder":
         text = params.get("text", message)
         remind_at_str = params.get("remind_at")
@@ -262,6 +305,10 @@ async def dispatch(message: str) -> str:
         if skip:
             parts.append(f"skipping: {skip}")
         reply = f"{category.capitalize()} news preferences updated — {', '.join(parts)}."
+
+    elif intent == "web_search":
+        query = params.get("query", message)
+        reply = await web_search(query)
 
     elif intent == "clear_history":
         _history.clear()
