@@ -31,8 +31,12 @@ async def _handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if not text:
         return
 
+    reply_context = None
+    if update.message.reply_to_message and update.message.reply_to_message.text:
+        reply_context = update.message.reply_to_message.text
+
     try:
-        response = await dispatch(text)
+        response = await dispatch(text, reply_context=reply_context)
         for chunk in _chunk(response):
             await update.message.reply_text(chunk)
     except Exception:
@@ -60,7 +64,7 @@ async def _handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("Couldn't transcribe that.")
             return
 
-        response = await dispatch(text)
+        response = await dispatch(text, reply_context=None)
         for chunk in _chunk(response):
             await update.message.reply_text(chunk)
     except Exception:

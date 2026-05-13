@@ -66,17 +66,16 @@ def _get_memory_rules_text() -> str:
     return "\n".join(f"ID {m['id']}: {m['trigger_pattern']}" for m in memories)
 
 
-async def parse_intent(message: str) -> tuple[dict, list[dict]]:
+async def parse_intent(message: str, reply_context: str | None = None) -> tuple[dict, list[dict]]:
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     memory_rules_text = _get_memory_rules_text()
     system = INTENT_SYSTEM_TEMPLATE.format(memory_rules=memory_rules_text) + now
 
-    # Only send last 6 history messages to the intent classifier — it doesn't
-    # need full context and sending 100 messages on every keystroke is the
-    # main driver of the 20s latency.
-    recent_history = list(_history)[-6:]
+    recent_history = list(_history)[-5:]
     messages = [{"role": "system", "content": system}]
     messages += recent_history
+    if reply_context:
+        messages.append({"role": "assistant", "content": reply_context})
     messages.append({"role": "user", "content": message})
 
     response = await chat(messages=messages)
@@ -99,8 +98,8 @@ async def parse_intent(message: str) -> tuple[dict, list[dict]]:
     return parsed, matched_memories
 
 
-async def dispatch(message: str) -> str:
-    parsed, matched_memories = await parse_intent(message)
+async def dispatch(message: str, reply_context: str | None = None) -> str:
+    parsed, matched_memories = await parse_intent(message, reply_context=reply_context)
     intent = parsed.get("intent", "general")
     params = parsed.get("params", {})
 
@@ -432,7 +431,9 @@ async def dispatch(message: str) -> str:
     else:
         system = "You are a helpful personal secretary. Be concise and direct."
         messages = [{"role": "system", "content": system}]
-        messages += list(_history)
+        messages += list(_history)[-5:]
+        if reply_context:
+            messages.append({"role": "assistant", "content": reply_context})
         messages.append({"role": "user", "content": message})
         reply = await chat(messages=messages)
 
