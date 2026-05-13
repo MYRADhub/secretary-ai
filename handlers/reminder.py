@@ -70,10 +70,16 @@ def list_pending_reminders() -> list[dict]:
 def format_reminders(reminders: list[dict]) -> str:
     if not reminders:
         return "No pending reminders."
+    from zoneinfo import ZoneInfo
+    from datetime import timezone
+    TZ = ZoneInfo("America/New_York")
     lines = []
     for r in reminders:
         dt = r["remind_at"]
         if isinstance(dt, str):
             dt = datetime.fromisoformat(dt)
-        lines.append(f"[{r['id']}] {r['text']} — {dt.strftime('%Y-%m-%d %H:%M')}")
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        dt_local = dt.astimezone(TZ)
+        lines.append(f"[{r['id']}] {r['text']} — {dt_local.strftime('%Y-%m-%d %H:%M %Z')}")
     return "\n".join(lines)

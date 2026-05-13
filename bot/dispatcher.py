@@ -71,8 +71,12 @@ async def parse_intent(message: str) -> tuple[dict, list[dict]]:
     memory_rules_text = _get_memory_rules_text()
     system = INTENT_SYSTEM_TEMPLATE.format(memory_rules=memory_rules_text) + now
 
+    # Only send last 6 history messages to the intent classifier — it doesn't
+    # need full context and sending 100 messages on every keystroke is the
+    # main driver of the 20s latency.
+    recent_history = list(_history)[-6:]
     messages = [{"role": "system", "content": system}]
-    messages += list(_history)
+    messages += recent_history
     messages.append({"role": "user", "content": message})
 
     response = await chat(messages=messages)
@@ -280,8 +284,14 @@ async def dispatch(message: str) -> str:
         if remind_at_str:
             try:
                 remind_dt = datetime.fromisoformat(remind_at_str)
-                result = reminder.add_reminder(text, remind_dt)
-                reply = f"Reminder set: '{result['text']}' at {remind_dt.strftime('%Y-%m-%d %H:%M')}"
+                # If the LLM returned a naive datetime, assume it's in the user's
+                # timezone (ET). Convert to UTC for consistent DB comparison with NOW().
+                if remind_dt.tzinfo is None:
+                    remind_dt = remind_dt.replace(tzinfo=TZ)
+                from datetime import timezone as _tz
+                remind_dt_utc = remind_dt.astimezone(_tz.utc)
+                result = reminder.add_reminder(text, remind_dt_utc)
+                reply = f"Reminder set: '{result['text']}' at {remind_dt.strftime('%Y-%m-%d %H:%M %Z')}"
             except ValueError:
                 reply = "Couldn't parse that time. Try 'remind me at 3pm tomorrow to call John'."
         else:
