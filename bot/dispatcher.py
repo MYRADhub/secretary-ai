@@ -27,6 +27,7 @@ Intents:
 - complete_all_todos: mark all tasks done
 - delete_todo: delete one task. params: {{"position": <int>}}
 - clear_all_todos: delete all pending tasks
+- clear_completed_todos: delete all done/completed tasks. Triggers on "clear done", "delete completed", "remove finished tasks", "wipe done".
 - rename_todo: rename a task. params: {{"position": <int>, "new_text": "..."}}
 - move_todo: reorder a task. params: {{"from_position": <int>, "to_position": <int>}}
   e.g. "move task 2 to top" to_position: 1; "move task 1 to bottom" to_position: 999
@@ -220,6 +221,10 @@ async def dispatch(message: str, reply_context: str | None = None) -> str:
     elif intent == "clear_all_todos":
         count = todo.clear_all_todos()
         reply = f"Cleared {count} task(s)."
+
+    elif intent == "clear_completed_todos":
+        count = todo.clear_completed_todos()
+        reply = f"Cleared {count} completed task(s)."
 
     elif intent == "rename_todo":
         position = params.get("position")

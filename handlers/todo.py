@@ -284,6 +284,17 @@ def clear_all_todos() -> int:
     return affected
 
 
+def clear_completed_todos() -> int:
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM todos WHERE done = 1")
+    affected = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    return affected
+
+
 def complete_all_todos() -> int:
     conn = get_conn()
     cur = conn.cursor()
