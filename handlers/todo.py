@@ -98,7 +98,7 @@ def list_by_tag(tag: str) -> list[dict]:
     return matched
 
 
-def _get_by_position(position: int, include_done: bool = False) -> dict | None:
+def _get_by_position(position: int, include_done: bool = True) -> dict | None:
     rows = _get_ordered(include_done)
     if 1 <= position <= len(rows):
         return rows[position - 1]
@@ -109,6 +109,8 @@ def complete_todo(position: int) -> dict:
     row = _get_by_position(position)
     if not row:
         return {"success": False}
+    if row.get("done"):
+        return {"success": True, "next_due": None, "already_done": True}
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("UPDATE todos SET done = 1 WHERE id = %s", (row["id"],))
@@ -134,6 +136,19 @@ def complete_todo(position: int) -> dict:
         )
         result["next_due"] = next_due
     return result
+
+
+def uncomplete_todo(position: int) -> bool:
+    row = _get_by_position(position)
+    if not row:
+        return False
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE todos SET done = 0 WHERE id = %s", (row["id"],))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return True
 
 
 def set_recurrence(position: int, rule: str | None, interval: int = 1) -> bool:

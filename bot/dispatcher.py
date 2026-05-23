@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from collections import deque
@@ -14,7 +15,7 @@ TZ = ZoneInfo("America/New_York")
 HISTORY_MAX = 100
 _history: deque = deque(maxlen=HISTORY_MAX)
 
-INTENT_SYSTEM_TEMPLATE = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters. Also check if any stored memory rules apply.
+INTENT_SYSTEM_TEMPLATE = """You are an intent classifier for a personal secretary bot. Classify the user's message and extract clean parameters.
 
 Intents:
 - add_todo: adding a task. Extract ONLY the task text, strip command phrases like "add", "put", "to my list", etc. Extract tags, due date, and recurrence if mentioned.
@@ -22,6 +23,7 @@ Intents:
 - list_todos: show full task list with no filtering. params: {{"include_done": true/false}}
 - filter_todos: user wants a filtered or sorted view. params: {{"query": "...", "include_done": true/false}}
 - complete_todo: mark a task done. params: {{"position": <int or null>}}
+- uncomplete_todo: mark a previously-done task as not done. Triggers on "X is not done", "undo task N", "mark N undone", "unmark N". params: {{"position": <int or null>}}
 - complete_all_todos: mark all tasks done
 - delete_todo: delete one task. params: {{"position": <int>}}
 - clear_all_todos: delete all pending tasks
@@ -52,24 +54,13 @@ Intents:
 - clear_history: reset conversation history
 - general: anything else
 
-Memory rules (check if any apply to this message):
-{memory_rules}
-
-Return JSON only: {{"intent": "<intent>", "params": {{}}, "matched_memory_id": <id or null>}}
+Return JSON only: {{"intent": "<intent>", "params": {{}}}}
 Current datetime: """
 
 
-def _get_memory_rules_text() -> str:
-    memories = memory.get_all_memories()
-    if not memories:
-        return "None stored."
-    return "\n".join(f"ID {m['id']}: {m['trigger_pattern']}" for m in memories)
-
-
-async def parse_intent(message: str, reply_context: str | None = None) -> tuple[dict, list[dict]]:
+async def parse_intent(message: str, reply_context: str | None = None) -> dict:
     now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-    memory_rules_text = _get_memory_rules_text()
-    system = INTENT_SYSTEM_TEMPLATE.format(memory_rules=memory_rules_text) + now
+    system = INTENT_SYSTEM_TEMPLATE + now
 
     recent_history = list(_history)[-5:]
     messages = [{"role": "system", "content": system}]
@@ -87,19 +78,16 @@ async def parse_intent(message: str, reply_context: str | None = None) -> tuple[
         if match:
             parsed = json.loads(match.group())
         else:
-            parsed = {"intent": "general", "params": {}, "matched_memory_id": None}
+            parsed = {"intent": "general", "params": {}}
 
-    matched_memory_id = parsed.pop("matched_memory_id", None)
-    matched_memories = []
-    if matched_memory_id:
-        all_memories = memory.get_all_memories()
-        matched_memories = [m for m in all_memories if m["id"] == matched_memory_id]
-
-    return parsed, matched_memories
+    return parsed
 
 
 async def dispatch(message: str, reply_context: str | None = None) -> str:
-    parsed, matched_memories = await parse_intent(message, reply_context=reply_context)
+    parsed, matched_memories = await asyncio.gather(
+        parse_intent(message, reply_context=reply_context),
+        memory.match_memories(message),
+    )
     intent = parsed.get("intent", "general")
     params = parsed.get("params", {})
 
@@ -127,6 +115,23 @@ async def dispatch(message: str, reply_context: str | None = None) -> str:
             prefix = mem_params.get("prefix", "")
             result = todo.add_todo(f"{prefix}{message}")
             reply = f"Added: '{result['text']}'"
+            _history.append({"role": "user", "content": message})
+            _history.append({"role": "assistant", "content": reply})
+            return reply
+
+        elif action == "custom_reply":
+            reply = mem_params.get("reply", "")
+            if reply:
+                _history.append({"role": "user", "content": message})
+                _history.append({"role": "assistant", "content": reply})
+                return reply
+
+        elif action == "forward_to_llm":
+            extra_system = mem_params.get("system", "")
+            messages = [{"role": "system", "content": f"You are a helpful personal secretary. {extra_system}"}]
+            messages += list(_history)[-5:]
+            messages.append({"role": "user", "content": message})
+            reply = await chat(messages=messages)
             _history.append({"role": "user", "content": message})
             _history.append({"role": "assistant", "content": reply})
             return reply
@@ -180,12 +185,23 @@ async def dispatch(message: str, reply_context: str | None = None) -> str:
             result = todo.complete_todo(int(position))
             if not result["success"]:
                 reply = f"No task at position {position}."
+            elif result.get("already_done"):
+                reply = f"Task {position} already done."
             elif result["next_due"]:
                 reply = f"Done. Next occurrence set for {result['next_due'].strftime('%b %d')}."
             else:
                 reply = "Done."
         else:
             todos = todo.list_todos()
+            reply = "Which task?\n" + todo.format_todo_list(todos)
+
+    elif intent == "uncomplete_todo":
+        position = params.get("position")
+        if position:
+            success = todo.uncomplete_todo(int(position))
+            reply = f"Task {position} marked not done." if success else f"No task at position {position}."
+        else:
+            todos = todo.list_todos(include_done=True)
             reply = "Which task?\n" + todo.format_todo_list(todos)
 
     elif intent == "complete_all_todos":
