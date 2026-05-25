@@ -24,6 +24,27 @@ async def chat(messages: list[dict], model: str | None = None, temperature: floa
     return response.choices[0].message.content.strip()
 
 
+async def chat_with_tools(
+    messages: list[dict],
+    tools: list[dict],
+    model: str | None = None,
+    temperature: float = 0.3,
+    tool_choice: str = "auto",
+):
+    client = get_client()
+    resolved_model = model or config.OPENAI_MODEL
+    kwargs = {
+        "model": resolved_model,
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": tool_choice,
+    }
+    if resolved_model not in _NO_TEMPERATURE_MODELS:
+        kwargs["temperature"] = temperature
+    response = await client.chat.completions.create(**kwargs)
+    return response.choices[0].message
+
+
 async def transcribe(file_path: str) -> str:
     client = get_client()
     with open(file_path, "rb") as f:
