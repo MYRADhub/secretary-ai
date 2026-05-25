@@ -22,10 +22,10 @@ Intents:
   params: {{"text": "...", "priority": "high|medium|normal|low", "tags": ["tag1"], "due_date": "YYYY-MM-DD or null", "recurrence_rule": "daily|weekly|monthly|weekdays or null", "recurrence_interval": 1}}
 - list_todos: show full task list with no filtering. params: {{"include_done": true/false}}
 - filter_todos: user wants a filtered or sorted view. params: {{"query": "...", "include_done": true/false}}
-- complete_todo: mark a task done. params: {{"position": <int or null>}}
-- uncomplete_todo: mark a previously-done task as not done. Triggers on "X is not done", "undo task N", "mark N undone", "unmark N". params: {{"position": <int or null>}}
+- complete_todo: mark one or more tasks done. params: {{"positions": [<int>, ...]}}. For single task use a one-element list. Triggers on "mark task N done", "mark tasks 1, 2, 3 done", "complete N".
+- uncomplete_todo: mark one or more previously-done tasks as not done. params: {{"positions": [<int>, ...]}}. Triggers on "X is not done", "undo task N", "mark N undone", "unmark tasks 1, 2".
 - complete_all_todos: mark all tasks done
-- delete_todo: delete one task. params: {{"position": <int>}}
+- delete_todo: delete one or more tasks. params: {{"positions": [<int>, ...]}}. Triggers on "delete N", "remove tasks 1, 2, 3".
 - clear_all_todos: delete all pending tasks
 - clear_completed_todos: delete all done/completed tasks. Triggers on "clear done", "delete completed", "remove finished tasks", "wipe done".
 - rename_todo: rename a task. params: {{"position": <int>, "new_text": "..."}}
@@ -57,6 +57,27 @@ Intents:
 
 Return JSON only: {{"intent": "<intent>", "params": {{}}}}
 Current datetime: """
+
+
+def _coerce_positions(params: dict) -> list[int]:
+    raw = params.get("positions")
+    if raw is None:
+        single = params.get("position")
+        raw = [single] if single is not None else []
+    if not isinstance(raw, list):
+        raw = [raw]
+    out = []
+    seen = set()
+    for v in raw:
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            continue
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(n)
+    return out
 
 
 async def parse_intent(message: str, reply_context: str | None = None) -> dict:
@@ -181,26 +202,52 @@ async def dispatch(message: str, reply_context: str | None = None) -> str:
             ])
 
     elif intent == "complete_todo":
-        position = params.get("position")
-        if position:
-            result = todo.complete_todo(int(position))
-            if not result["success"]:
-                reply = f"No task at position {position}."
-            elif result.get("already_done"):
-                reply = f"Task {position} already done."
-            elif result["next_due"]:
-                reply = f"Done. Next occurrence set for {result['next_due'].strftime('%b %d')}."
-            else:
-                reply = "Done."
+        positions = _coerce_positions(params)
+        if positions:
+            done_count = 0
+            missing = []
+            already = []
+            next_dues = []
+            for p in positions:
+                result = todo.complete_todo(p)
+                if not result["success"]:
+                    missing.append(p)
+                elif result.get("already_done"):
+                    already.append(p)
+                else:
+                    done_count += 1
+                    if result.get("next_due"):
+                        next_dues.append((p, result["next_due"]))
+            parts = []
+            if done_count:
+                parts.append(f"Marked {done_count} task(s) done.")
+            if already:
+                parts.append(f"Already done: {', '.join(str(p) for p in already)}.")
+            if missing:
+                parts.append(f"No task at: {', '.join(str(p) for p in missing)}.")
+            for p, d in next_dues:
+                parts.append(f"Task {p} repeats — next on {d.strftime('%b %d')}.")
+            reply = " ".join(parts) if parts else "Nothing changed."
         else:
             todos = todo.list_todos()
             reply = "Which task?\n" + todo.format_todo_list(todos)
 
     elif intent == "uncomplete_todo":
-        position = params.get("position")
-        if position:
-            success = todo.uncomplete_todo(int(position))
-            reply = f"Task {position} marked not done." if success else f"No task at position {position}."
+        positions = _coerce_positions(params)
+        if positions:
+            ok = 0
+            missing = []
+            for p in positions:
+                if todo.uncomplete_todo(p):
+                    ok += 1
+                else:
+                    missing.append(p)
+            parts = []
+            if ok:
+                parts.append(f"Marked {ok} task(s) not done.")
+            if missing:
+                parts.append(f"No task at: {', '.join(str(p) for p in missing)}.")
+            reply = " ".join(parts) if parts else "Nothing changed."
         else:
             todos = todo.list_todos(include_done=True)
             reply = "Which task?\n" + todo.format_todo_list(todos)
@@ -210,10 +257,21 @@ async def dispatch(message: str, reply_context: str | None = None) -> str:
         reply = f"Marked {count} task(s) as done."
 
     elif intent == "delete_todo":
-        position = params.get("position")
-        if position:
-            success = todo.delete_todo(int(position))
-            reply = "Deleted." if success else f"No task at position {position}."
+        positions = _coerce_positions(params)
+        if positions:
+            deleted = 0
+            missing = []
+            for p in sorted(positions, reverse=True):
+                if todo.delete_todo(p):
+                    deleted += 1
+                else:
+                    missing.append(p)
+            parts = []
+            if deleted:
+                parts.append(f"Deleted {deleted} task(s).")
+            if missing:
+                parts.append(f"No task at: {', '.join(str(p) for p in missing)}.")
+            reply = " ".join(parts) if parts else "Nothing deleted."
         else:
             todos = todo.list_todos()
             reply = "Which task?\n" + todo.format_todo_list(todos)
