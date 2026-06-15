@@ -183,6 +183,30 @@ def init_db() -> None:
             UNIQUE (module_num, lesson_num)
         )
     """)
+    cur.execute("""
+        ALTER TABLE curriculum_progress
+        ADD COLUMN IF NOT EXISTS section_num INTEGER NOT NULL DEFAULT 0
+    """)
+    cur.execute("""
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'curriculum_progress_module_num_lesson_num_key'
+            ) THEN
+                ALTER TABLE curriculum_progress
+                DROP CONSTRAINT curriculum_progress_module_num_lesson_num_key;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'curriculum_progress_module_section_lesson_key'
+            ) THEN
+                ALTER TABLE curriculum_progress
+                ADD CONSTRAINT curriculum_progress_module_section_lesson_key
+                UNIQUE (module_num, section_num, lesson_num);
+            END IF;
+        END$$;
+    """)
 
     conn.commit()
     cur.close()
