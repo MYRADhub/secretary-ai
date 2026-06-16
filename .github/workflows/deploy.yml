@@ -1,4 +1,4 @@
-name: Deploy to DigitalOcean
+name: Deploy to Home Server
 
 on:
   push:
@@ -7,13 +7,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, home]
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: root
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            bash /home/secretary/secretary-ai/deploy/update.sh
+      - name: Run update script
+        run: bash /home/murad/secretary-ai/deploy/update.sh

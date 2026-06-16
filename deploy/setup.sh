@@ -1,44 +1,41 @@
 #!/bin/bash
 set -e
 
-echo "=== Secretary AI — Server Setup ==="
+echo "=== Secretary AI — Server Setup (home server) ==="
+
+APP_DIR="/home/murad/secretary-ai"
 
 # system deps
-apt-get update -qq
-apt-get install -y python3.12 python3.12-venv python3-pip git postgresql-client
-
-# create app user
-if ! id -u secretary &>/dev/null; then
-    useradd -m -s /bin/bash secretary
-fi
+sudo apt-get update -qq
+sudo apt-get install -y python3.12 python3.12-venv python3-pip git postgresql-16 postgresql-client-16
 
 # clone or pull repo
-APP_DIR="/home/secretary/secretary-ai"
 if [ -d "$APP_DIR" ]; then
     echo "Repo exists, pulling latest..."
-    sudo -u secretary git -C "$APP_DIR" pull
+    git -C "$APP_DIR" pull
 else
     echo "Cloning repo..."
-    sudo -u secretary git clone https://github.com/MYRADhub/secretary-ai.git "$APP_DIR"
+    git clone https://github.com/MYRADhub/secretary-ai.git "$APP_DIR"
 fi
 
 # install python deps
-sudo -u secretary python3.12 -m venv "$APP_DIR/.venv"
-sudo -u secretary "$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
+python3.12 -m venv "$APP_DIR/.venv"
+"$APP_DIR/.venv/bin/pip" install -q --upgrade pip
+"$APP_DIR/.venv/bin/pip" install -q -r "$APP_DIR/requirements.txt"
 
-# copy env file if not present
+# env file check
 if [ ! -f "$APP_DIR/.env" ]; then
     echo "WARNING: No .env file found at $APP_DIR/.env"
     echo "Copy your .env file there before starting the service."
 fi
 
 # install systemd service
-cp /home/secretary/secretary-ai/deploy/secretary-ai.service /etc/systemd/system/secretary-ai.service
-systemctl daemon-reload
-systemctl enable secretary-ai
-systemctl restart secretary-ai
+sudo cp "$APP_DIR/deploy/secretary-ai.service" /etc/systemd/system/secretary-ai.service
+sudo systemctl daemon-reload
+sudo systemctl enable secretary-ai
+sudo systemctl restart secretary-ai
 
 echo ""
 echo "=== Done ==="
-echo "Check status with: systemctl status secretary-ai"
+echo "Check status with: sudo systemctl status secretary-ai"
 echo "View logs with:    journalctl -u secretary-ai -f"
