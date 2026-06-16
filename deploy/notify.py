@@ -3,7 +3,7 @@ import sys
 import httpx
 from dotenv import load_dotenv
 
-load_dotenv("/home/secretary/secretary-ai/.env")
+load_dotenv("/home/murad/secretary-ai/.env")
 
 token = os.getenv("TELEGRAM_BOT_TOKEN")
 user_id = os.getenv("TELEGRAM_ALLOWED_USER_ID")
