@@ -98,7 +98,14 @@ def list_by_tag(tag: str) -> list[dict]:
     return matched
 
 
-def _get_by_position(position: int, include_done: bool = True) -> dict | None:
+def _get_by_position(position: int, include_done: bool = False) -> dict | None:
+    """Resolve a position the way the user saw it.
+
+    list_todos() and move_todo() number the pending tasks only, so every other
+    mutation has to number them the same way. Numbering over the completed rows
+    as well shifted every position by the number of finished tasks, which made
+    "delete task 3" hit a different task than the one shown as 3.
+    """
     rows = _get_ordered(include_done)
     if 1 <= position <= len(rows):
         return rows[position - 1]
@@ -139,7 +146,9 @@ def complete_todo(position: int) -> dict:
 
 
 def uncomplete_todo(position: int) -> bool:
-    row = _get_by_position(position)
+    # The only operation that addresses completed tasks, so it is the only one
+    # that numbers them: it follows list_todos(include_done=True).
+    row = _get_by_position(position, include_done=True)
     if not row:
         return False
     conn = get_conn()

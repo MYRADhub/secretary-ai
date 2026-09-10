@@ -38,6 +38,11 @@ def main() -> None:
         logger.info("Scheduler started")
 
     async def on_shutdown(application: Application) -> None:
+        # post_shutdown also runs when startup aborted (bad token, no network),
+        # in which case post_init never started the scheduler. Shutting a
+        # never-started scheduler down raises and buries the real error.
+        if not scheduler.running:
+            return
         scheduler.shutdown(wait=False)
         logger.info("Scheduler stopped")
 

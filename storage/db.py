@@ -4,8 +4,13 @@ import os
 
 
 def get_conn():
-    conn = psycopg2.connect(os.environ["DATABASE_URL"], sslmode="require")
-    return conn
+    url = os.environ["DATABASE_URL"]
+    # Managed Postgres (DigitalOcean, Supabase, RDS) needs TLS, so require it by
+    # default. A URL that states its own sslmode wins, which is what lets a
+    # local or self-hosted instance without TLS connect.
+    if "sslmode=" in url:
+        return psycopg2.connect(url)
+    return psycopg2.connect(url, sslmode="require")
 
 
 def init_db() -> None:

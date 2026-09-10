@@ -12,13 +12,13 @@ NEWS_FETCH_TIMES = ["08:00", "18:00"]
 
 NEWS_FEEDS = [
     "https://hnrss.org/frontpage",
-    "https://feeds.feedburner.com/oreilly/radar",
+    "https://www.oreilly.com/radar/feed/index.xml",
     "https://www.artificialintelligence-news.com/feed/",
     "https://techcrunch.com/feed/",
 ]
 
 FINANCE_FEEDS = [
-    "https://feeds.finance.yahoo.com/rss/2.0/headline",
+    "https://finance.yahoo.com/news/rssindex",
     "https://feeds.marketwatch.com/marketwatch/topstories/",
     "https://www.cnbc.com/id/100003114/device/rss/rss.html",
 ]
